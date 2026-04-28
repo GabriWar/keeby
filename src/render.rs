@@ -43,6 +43,25 @@ impl State {
         }
     }
 
+    /// Push a synthetic labeled pill (e.g. "ScrollUp"). Dedups against the most
+    /// recent identical pill within `dedup_ms` so fast scroll wheels don't flood.
+    pub fn push_label(&mut self, text: &str, dedup_ms: u128) -> bool {
+        let now = Instant::now();
+        if let Some(last) = self.stream.back() {
+            if last.text == text && now.duration_since(last.created).as_millis() < dedup_ms {
+                return false;
+            }
+        }
+        self.stream.push_back(Pill {
+            text: text.to_string(),
+            created: now,
+        });
+        while self.stream.len() > MAX_PILLS {
+            self.stream.pop_front();
+        }
+        true
+    }
+
     /// Returns `true` if a pill was pushed (non-modifier press).
     pub fn press(&mut self, k: Key) -> bool {
         if is_modifier(k) {

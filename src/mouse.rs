@@ -188,7 +188,8 @@ impl MouseRenderer {
         // Three buttons (LMB / MMB / RMB).
         if self.show_buttons {
             let buttons = [state.btn_left, state.btn_middle, state.btn_right];
-            let (long, short) = (s * 0.55, s * 0.30);
+            // Squatter buttons — were s*0.55 tall, looked like pills standing on end.
+            let (long, short) = (s * 0.35, s * 0.28);
             let gap = s * 0.08;
             match self.orientation {
                 Orientation::Horizontal => {
