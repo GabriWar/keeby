@@ -4,6 +4,12 @@ Lightweight Wayland on-screen overlay that shows what your keyboard and mouse ar
 
 Built for screencasts, livestreams, pair-debugging — anywhere you want viewers to actually see what you're pressing.
 
+![keeby overview](assets/overview.png)
+
+Live mouse direction indicator follows your motion:
+
+![mouse closeup](assets/mouse.png)
+
 ## Features
 
 - **Keystroke FIFO** — every press appears as a pill, oldest scrolls left, fades after a few seconds
@@ -14,10 +20,6 @@ Built for screencasts, livestreams, pair-debugging — anywhere you want viewers
 - **Per-monitor pinning** — lock to `eDP-1` or `HDMI-A-1` instead of "wherever was focused at launch"
 - **Wayland-native** — uses `wlr-layer-shell`, click-through input region, never steals focus
 - **Cheap** — ~1 MB binary, < 10 MB RSS, integer-math glyph blit, vsync-throttled redraws
-
-## Demo
-
-`(drop a gif here when you have one)`
 
 ## Install
 
