@@ -26,47 +26,97 @@ pub enum MouseBtn {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DevKind {
+pub enum DevKind {
     Keyboard,
     Mouse,
     Other,
 }
 
-/// Set of currently-watched device paths so hotplug events don't double-spawn.
+/// Filter built from the user's config. Empty whitelists = accept all detected.
+#[derive(Clone, Default)]
+pub struct DeviceFilter {
+    pub keyboard_substrings: Vec<String>,
+    pub mouse_substrings: Vec<String>,
+}
+
+impl DeviceFilter {
+    pub fn from_lists(keyboards: &[String], mice: &[String]) -> Self {
+        Self {
+            keyboard_substrings: keyboards.iter().map(|s| s.to_lowercase()).collect(),
+            mouse_substrings: mice.iter().map(|s| s.to_lowercase()).collect(),
+        }
+    }
+    fn allows(&self, kind: DevKind, name: Option<&str>) -> bool {
+        let n = name.unwrap_or("").to_lowercase();
+        match kind {
+            DevKind::Keyboard => {
+                self.keyboard_substrings.is_empty()
+                    || self.keyboard_substrings.iter().any(|s| n.contains(s))
+            }
+            DevKind::Mouse => {
+                self.mouse_substrings.is_empty()
+                    || self.mouse_substrings.iter().any(|s| n.contains(s))
+            }
+            DevKind::Other => false,
+        }
+    }
+}
+
 type Tracked = Arc<Mutex<std::collections::HashSet<PathBuf>>>;
 
-pub fn spawn(tx: Sender<InputMsg>) {
+pub fn spawn(tx: Sender<InputMsg>, filter: DeviceFilter) {
     let tracked: Tracked = Arc::new(Mutex::new(Default::default()));
+    let filter = Arc::new(filter);
 
-    // Enumerate already-attached devices.
+    eprintln!("keeby: scanning input devices");
     for (path, dev) in evdev::enumerate() {
-        try_spawn_device(&path, dev, &tx, &tracked);
+        try_spawn_device(&path, dev, &tx, &tracked, &filter, true);
     }
 
-    // Watch /dev/input for new devices (replugs, USB hotplug, virtual KVM).
     let tx_watch = tx.clone();
     let tracked_watch = tracked.clone();
+    let filter_watch = filter.clone();
     thread::Builder::new()
         .name("evdev-hotplug".into())
         .spawn(move || {
-            if let Err(e) = watch_hotplug(tx_watch, tracked_watch) {
+            if let Err(e) = watch_hotplug(tx_watch, tracked_watch, filter_watch) {
                 eprintln!("keeby: hotplug watcher exited: {e}");
             }
         })
         .expect("spawn hotplug watcher");
 }
 
-fn try_spawn_device(path: &Path, dev: Device, tx: &Sender<InputMsg>, tracked: &Tracked) {
+fn try_spawn_device(
+    path: &Path,
+    dev: Device,
+    tx: &Sender<InputMsg>,
+    tracked: &Tracked,
+    filter: &Arc<DeviceFilter>,
+    log: bool,
+) {
     let kind = device_kind(&dev);
+    let name = dev.name().map(|s| s.to_string());
+    let name_str = name.as_deref().unwrap_or("?");
+
     if kind == DevKind::Other {
+        return;
+    }
+    if !filter.allows(kind, name.as_deref()) {
+        if log {
+            eprintln!("  skip {} [{:?}] {} (filtered)", path.display(), kind, name_str);
+        }
         return;
     }
     {
         let mut set = tracked.lock().unwrap();
         if !set.insert(path.to_path_buf()) {
-            return; // already watching
+            return;
         }
     }
+    if log {
+        eprintln!("  use  {} [{:?}] {}", path.display(), kind, name_str);
+    }
+
     let tx = tx.clone();
     let tracked = tracked.clone();
     let path_owned = path.to_path_buf();
@@ -74,13 +124,12 @@ fn try_spawn_device(path: &Path, dev: Device, tx: &Sender<InputMsg>, tracked: &T
         .name(format!("evdev-{}", path.display()))
         .spawn(move || {
             let _ = run_device(dev, kind, tx);
-            // On exit (replug, EOF, perm-change): drop from tracked set so the
-            // next hotplug for the same path is allowed to re-spawn.
             tracked.lock().unwrap().remove(&path_owned);
         })
         .expect("spawn evdev thread");
 }
 
+/// Loose classifier — only requires the bare minimum a real keyboard/mouse reports.
 fn device_kind(dev: &Device) -> DevKind {
     let has_rel_x = dev
         .supported_relative_axes()
@@ -88,15 +137,38 @@ fn device_kind(dev: &Device) -> DevKind {
         .unwrap_or(false);
     let keys = dev.supported_keys();
     let has_btn_left = keys.map(|k| k.contains(Key::BTN_LEFT)).unwrap_or(false);
+
+    // Mouse: relative-X + a real mouse button. Excludes plain touchpads (those
+    // also have BTN_TOUCH but we still want to accept since they have BTN_LEFT).
     if has_rel_x && has_btn_left {
         return DevKind::Mouse;
     }
+    // Keyboard: at minimum has KEY_SPACE or KEY_A. This catches:
+    //   - laptop integrated keyboards
+    //   - external USB keyboards (incl. one half of a split mech)
+    //   - bluetooth keyboards advertising a partial keymap
     if let Some(keys) = keys {
-        if keys.contains(Key::KEY_A) && keys.contains(Key::KEY_Z) && keys.contains(Key::KEY_LEFTCTRL) {
+        let looks_like_keyboard = keys.contains(Key::KEY_SPACE)
+            || keys.contains(Key::KEY_A)
+            || keys.contains(Key::KEY_ENTER);
+        // Avoid matching power-button / lid-switch nodes that only advertise
+        // KEY_POWER / KEY_SLEEP without any letters.
+        if looks_like_keyboard {
             return DevKind::Keyboard;
         }
     }
     DevKind::Other
+}
+
+/// Diagnostic: enumerate every device, return (path, name, kind) tuples.
+pub fn list_devices() -> Vec<(PathBuf, String, DevKind)> {
+    let mut out = Vec::new();
+    for (path, dev) in evdev::enumerate() {
+        let name = dev.name().unwrap_or("(no name)").to_string();
+        let kind = device_kind(&dev);
+        out.push((path, name, kind));
+    }
+    out
 }
 
 fn run_device(mut dev: Device, kind: DevKind, tx: Sender<InputMsg>) -> std::io::Result<()> {
@@ -164,10 +236,12 @@ fn run_device(mut dev: Device, kind: DevKind, tx: Sender<InputMsg>) -> std::io::
     }
 }
 
-fn watch_hotplug(tx: Sender<InputMsg>, tracked: Tracked) -> std::io::Result<()> {
+fn watch_hotplug(
+    tx: Sender<InputMsg>,
+    tracked: Tracked,
+    filter: Arc<DeviceFilter>,
+) -> std::io::Result<()> {
     let mut inotify = Inotify::init()?;
-    // CREATE: new event* file appears (USB plug-in).
-    // ATTRIB: udev usually sets perms in a separate step after CREATE — wait for it.
     inotify
         .watches()
         .add("/dev/input", WatchMask::CREATE | WatchMask::ATTRIB)?;
@@ -181,10 +255,9 @@ fn watch_hotplug(tx: Sender<InputMsg>, tracked: Tracked) -> std::io::Result<()> 
                 continue;
             }
             let path = PathBuf::from("/dev/input").join(name.to_owned());
-            // Re-check briefly because udev often sets perms after the inode appears.
             for _ in 0..3 {
                 if let Ok(dev) = Device::open(&path) {
-                    try_spawn_device(&path, dev, &tx, &tracked);
+                    try_spawn_device(&path, dev, &tx, &tracked, &filter, true);
                     break;
                 }
                 thread::sleep(Duration::from_millis(120));

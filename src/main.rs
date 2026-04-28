@@ -34,7 +34,7 @@ use wayland_client::{
 };
 
 use crate::config::{Anchor as CfgAnchor, Config};
-use crate::input::InputMsg;
+use crate::input::{DeviceFilter, InputMsg};
 use crate::labels::parse_key_name;
 use crate::mouse::{MouseRenderer, MouseState};
 use crate::render::{Renderer, State as KeyState, HEIGHT, WIDTH};
@@ -341,7 +341,88 @@ fn anchor_margins(a: CfgAnchor, mx: i32, my: i32) -> (i32, i32, i32, i32) {
     }
 }
 
+fn print_help() {
+    println!("keeby — Wayland keystroke + mouse activity overlay\n");
+    println!("USAGE:");
+    println!("    keeby            run the overlay (default)");
+    println!("    keeby --list     list keyboards, mice, and monitors, then exit");
+    println!("    keeby --help     show this message\n");
+    println!("CONFIG:  ~/.config/keeby/config.conf");
+    println!("REPO:    https://github.com/GabriWar/keeby");
+}
+
+fn run_list() {
+    use crate::input::{list_devices, DevKind};
+    println!("=== KEYBOARDS ===");
+    let devs = list_devices();
+    let mut found_kbd = false;
+    for (path, name, kind) in &devs {
+        if matches!(kind, DevKind::Keyboard) {
+            println!("  {}\t{}", path.display(), name);
+            found_kbd = true;
+        }
+    }
+    if !found_kbd { println!("  (none detected)"); }
+
+    println!("\n=== MICE ===");
+    let mut found_mouse = false;
+    for (path, name, kind) in &devs {
+        if matches!(kind, DevKind::Mouse) {
+            println!("  {}\t{}", path.display(), name);
+            found_mouse = true;
+        }
+    }
+    if !found_mouse { println!("  (none detected)"); }
+
+    println!("\n=== MONITORS ===");
+    match list_monitors() {
+        Ok(list) if !list.is_empty() => {
+            for name in list {
+                println!("  {name}");
+            }
+        }
+        Ok(_) => println!("  (none — no Wayland session?)"),
+        Err(e) => println!("  error: {e}"),
+    }
+
+    println!(
+        "\nTo whitelist devices, paste names into ~/.config/keeby/config.conf:\n  keyboards = AT Translated, Corne\n  mice      = Logitech, Razer\n  monitor   = eDP-1"
+    );
+}
+
+fn list_monitors() -> Result<Vec<String>, String> {
+    let conn = Connection::connect_to_env().map_err(|e| e.to_string())?;
+    let (globals, _eq) = registry_queue_init::<OutputProbe>(&conn).map_err(|e| e.to_string())?;
+    let mut probe_eq = conn.new_event_queue::<OutputProbe>();
+    let probe_qh = probe_eq.handle();
+    let mut probe = OutputProbe {
+        registry_state: RegistryState::new(&globals),
+        output_state: OutputState::new(&globals, &probe_qh),
+    };
+    probe_eq.roundtrip(&mut probe).map_err(|e| e.to_string())?;
+    probe_eq.roundtrip(&mut probe).map_err(|e| e.to_string())?;
+    let mut names = Vec::new();
+    for o in probe.output_state.outputs() {
+        if let Some(info) = probe.output_state.info(&o) {
+            if let Some(n) = info.name {
+                names.push(n);
+            }
+        }
+    }
+    Ok(names)
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "-h" || a == "--help" || a == "help") {
+        print_help();
+        return;
+    }
+    if args.iter().any(|a| a == "-l" || a == "--list" || a == "list") {
+        run_list();
+        return;
+    }
+
     let cfg = Config::load();
 
     let conn = Connection::connect_to_env().expect("connect wayland");
@@ -499,7 +580,8 @@ fn main() {
         .expect("insert wayland source");
 
     let (mpsc_tx, mpsc_rx) = mpsc::channel::<InputMsg>();
-    input::spawn(mpsc_tx);
+    let filter = DeviceFilter::from_lists(&cfg.keyboard_names, &cfg.mouse_names);
+    input::spawn(mpsc_tx, filter);
 
     let (loop_tx, loop_chan) = calloop::channel::channel::<InputMsg>();
     std::thread::spawn(move || {

@@ -15,7 +15,11 @@ Live mouse direction indicator follows your motion:
 - **Keystroke FIFO** — every press appears as a pill, oldest scrolls left, fades after a few seconds
 - **Smart chord pills** — `Ctrl+Shift+A` shows up as one pill, not three. Modifier-only presses don't clutter the stream.
 - **Live mouse widget** — cursor disc with a direction-arrow that tracks motion, three button cells that light on click, scroll chevrons that flash on the wheel
-- **Two independent layer surfaces** — keys go where you want, mouse widget goes where you want, both with separate anchor + margins
+- **Hot-plug aware** — `inotify` watches `/dev/input`, so unplugging/replugging a USB keyboard, switching a KVM, or letting a Bluetooth keeb wake up just works without a restart
+- **Pick your devices** — whitelist keyboards or mice by name substring; useful when a Bluetooth headset advertises media keys you don't want polluting the stream
+- **Privacy panic key** — single tap (default `Pause`) freezes input capture and wipes the visible state; tap again to resume
+- **Two independent layer surfaces** — keys go where you want, mouse widget goes where you want, separate anchor + margins
+- **Custom font** — point at any `.ttf` / `.otf` you have installed; defaults to Cozette
 - **Theme via plain hex** — paste your `pywal` / `hellwal` / `wallust` colors straight into the config
 - **Per-monitor pinning** — lock to `eDP-1` or `HDMI-A-1` instead of "wherever was focused at launch"
 - **Wayland-native** — uses `wlr-layer-shell`, click-through input region, never steals focus
@@ -59,7 +63,9 @@ Or point `font = /path/to/anything.ttf` in the config.
 ## Usage
 
 ```fish
-keeby
+keeby            # run the overlay (default)
+keeby --list     # list every detected keyboard, mouse, and monitor — copy these into config
+keeby --help
 ```
 
 Toggle from a window manager keybind (Hyprland example):
@@ -67,6 +73,17 @@ Toggle from a window manager keybind (Hyprland example):
 ```ini
 bind = SUPER+SHIFT, F5, exec, pkill -x keeby || keeby &
 ```
+
+### Picking specific devices
+
+By default keeby grabs every keyboard and every mouse it detects. If a stray device leaks into the stream (a Bluetooth headset advertising AVRCP "media keys", a fingerprint reader, a virtual KVM dongle, etc), run `keeby --list` to see the names, then whitelist what you actually want:
+
+```ini
+keyboards = AT Translated, Corne     # only my laptop keeb + my Corne, ignore TOZO headphones
+mice      = Logitech                  # only the USB mouse, ignore the touchpad
+```
+
+Substrings are matched case-insensitively. Empty (or absent) means "accept all".
 
 ## Configuration
 
@@ -100,6 +117,16 @@ mouse_arrow_color   = #ffc750f2
 
 # pin to a specific output (or "auto")
 monitor = eDP-1
+
+# device whitelist — substrings, case-insensitive, comma-separated
+# (run `keeby --list` to see candidates)
+keyboards =
+mice      =
+
+# privacy panic key — single tap freezes capture, second tap resumes
+# accepts F1..F12, Pause, ScrollLock, Print, Insert, NumLock, Menu, CapsLock,
+# any single letter or digit. set `none` to disable.
+privacy_key = Pause
 ```
 
 `mouse_anchor` accepts: `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`.
@@ -110,7 +137,8 @@ monitor = eDP-1
 - Click-through via empty `wl_region` as input region — never blocks anything underneath
 - Drawing: `tiny-skia` rasterizes shapes, `fontdue` rasterizes glyphs, results memcpy'd directly into a `wl_shm` buffer with `Abgr8888` (no byte-swap needed on little-endian)
 - Mouse redraws are gated by frame-callbacks: 1000 Hz mouse polling rate becomes ~vsync-rate redraws, not 1000 redraws/sec
-- Input thread per `/dev/input/event*` device, deduped by capability (mouse vs keyboard)
+- Input thread per `/dev/input/event*` device, classified by capability (mouse vs keyboard) and filtered by name
+- Hot-plug: `inotify` on `/dev/input` watches `CREATE` + `ATTRIB`. New device → new reader thread. Old reader exits cleanly on EOF when its fd dies.
 
 ## Compositor support
 

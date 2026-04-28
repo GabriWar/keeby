@@ -58,6 +58,12 @@ pub struct Config {
 
     /// Name of the key that toggles privacy mode (drops all input until pressed again).
     pub privacy_key: Option<String>,
+
+    /// Optional whitelist of keyboard device-name substrings (case-insensitive).
+    /// Empty = accept everything classified as a keyboard.
+    pub keyboard_names: Vec<String>,
+    /// Same for mouse devices.
+    pub mouse_names: Vec<String>,
 }
 
 impl Default for Config {
@@ -88,6 +94,8 @@ impl Default for Config {
             auto_hide_mouse: false,
             auto_hide_mouse_secs: 6.0,
             privacy_key: Some("Pause".to_string()),
+            keyboard_names: Vec::new(),
+            mouse_names: Vec::new(),
         }
     }
 }
@@ -218,6 +226,12 @@ impl Config {
                         Some(v.to_string())
                     };
                 }
+                "keyboards" | "keyboard_names" => {
+                    cfg.keyboard_names = parse_name_list(v);
+                }
+                "mice" | "mouse_names" => {
+                    cfg.mouse_names = parse_name_list(v);
+                }
                 _ => {}
             }
         }
@@ -328,6 +342,17 @@ auto_hide_mouse_secs = 6.0
 # accepted: F1..F12, Pause, ScrollLock, Print, Insert, NumLock, Menu, CapsLock,
 #           or any single letter (a..z) / digit (0..9).
 privacy_key = Pause
+
+# --- input device whitelist ---
+# Comma-separated list of substrings (case-insensitive). If set, only devices
+# whose name contains one of the substrings will be picked up. If empty,
+# every detected keyboard / mouse is used.
+# Run `keeby` once and check stderr — it prints every detected device's name.
+# Examples:
+#   keyboards = AT Translated, Corne
+#   mice      = Logitech, Razer
+keyboards =
+mice      =
 ";
     std::fs::write(path, body)
 }
@@ -353,6 +378,13 @@ fn parse_anchor(s: &str) -> Option<Anchor> {
         "bottom-right" | "bottomright" | "br" => Anchor::BottomRight,
         _ => return None,
     })
+}
+
+fn parse_name_list(s: &str) -> Vec<String> {
+    s.split(',')
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect()
 }
 
 fn parse_orientation(s: &str) -> Option<Orientation> {
