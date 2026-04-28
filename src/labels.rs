@@ -141,6 +141,52 @@ pub fn label(k: Key) -> &'static str {
     "?"
 }
 
+/// Parse a friendly name like "Pause", "F12", "ScrollLock", "a" into an evdev::Key.
+pub fn parse_key_name(s: &str) -> Option<Key> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let upper = s.to_ascii_uppercase().replace(['_', '-', ' '], "");
+    Some(match upper.as_str() {
+        "PAUSE" | "BREAK" => Key::KEY_PAUSE,
+        "SCROLLLOCK" | "SCRLK" => Key::KEY_SCROLLLOCK,
+        "PRINT" | "PRINTSCREEN" | "PRTSC" | "SYSRQ" => Key::KEY_PRINT,
+        "INSERT" | "INS" => Key::KEY_INSERT,
+        "NUMLOCK" | "NUMLK" => Key::KEY_NUMLOCK,
+        "MENU" | "COMPOSE" => Key::KEY_COMPOSE,
+        "CAPSLOCK" | "CAPS" => Key::KEY_CAPSLOCK,
+        "HOME" => Key::KEY_HOME,
+        "END" => Key::KEY_END,
+        "PAGEUP" | "PGUP" => Key::KEY_PAGEUP,
+        "PAGEDOWN" | "PGDN" => Key::KEY_PAGEDOWN,
+        "DELETE" | "DEL" => Key::KEY_DELETE,
+        "F1" => Key::KEY_F1,
+        "F2" => Key::KEY_F2,
+        "F3" => Key::KEY_F3,
+        "F4" => Key::KEY_F4,
+        "F5" => Key::KEY_F5,
+        "F6" => Key::KEY_F6,
+        "F7" => Key::KEY_F7,
+        "F8" => Key::KEY_F8,
+        "F9" => Key::KEY_F9,
+        "F10" => Key::KEY_F10,
+        "F11" => Key::KEY_F11,
+        "F12" => Key::KEY_F12,
+        "A" => Key::KEY_A, "B" => Key::KEY_B, "C" => Key::KEY_C, "D" => Key::KEY_D,
+        "E" => Key::KEY_E, "F" => Key::KEY_F, "G" => Key::KEY_G, "H" => Key::KEY_H,
+        "I" => Key::KEY_I, "J" => Key::KEY_J, "K" => Key::KEY_K, "L" => Key::KEY_L,
+        "M" => Key::KEY_M, "N" => Key::KEY_N, "O" => Key::KEY_O, "P" => Key::KEY_P,
+        "Q" => Key::KEY_Q, "R" => Key::KEY_R, "S" => Key::KEY_S, "T" => Key::KEY_T,
+        "U" => Key::KEY_U, "V" => Key::KEY_V, "W" => Key::KEY_W, "X" => Key::KEY_X,
+        "Y" => Key::KEY_Y, "Z" => Key::KEY_Z,
+        "0" => Key::KEY_0, "1" => Key::KEY_1, "2" => Key::KEY_2, "3" => Key::KEY_3,
+        "4" => Key::KEY_4, "5" => Key::KEY_5, "6" => Key::KEY_6, "7" => Key::KEY_7,
+        "8" => Key::KEY_8, "9" => Key::KEY_9,
+        _ => return None,
+    })
+}
+
 pub fn modifier_order(k: Key) -> u8 {
     if k == Key::KEY_LEFTCTRL || k == Key::KEY_RIGHTCTRL {
         0

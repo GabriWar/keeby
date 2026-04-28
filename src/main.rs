@@ -35,8 +35,10 @@ use wayland_client::{
 
 use crate::config::{Anchor as CfgAnchor, Config};
 use crate::input::InputMsg;
+use crate::labels::parse_key_name;
 use crate::mouse::{MouseRenderer, MouseState};
 use crate::render::{Renderer, State as KeyState, HEIGHT, WIDTH};
+use evdev::Key;
 
 // ============================================================================
 // Output probe: dedicated tiny dispatch target for the initial output roundtrip.
@@ -98,6 +100,9 @@ struct App {
     cfg_auto_hide_keys_secs: f32,
     cfg_auto_hide_mouse: bool,
     cfg_auto_hide_mouse_secs: f32,
+
+    privacy_key: Option<Key>,
+    privacy_mode: bool,
 
     exit: bool,
 }
@@ -476,8 +481,15 @@ fn main() {
         cfg_auto_hide_keys_secs: cfg.auto_hide_keys_secs,
         cfg_auto_hide_mouse: cfg.auto_hide_mouse,
         cfg_auto_hide_mouse_secs: cfg.auto_hide_mouse_secs,
+        privacy_key: cfg.privacy_key.as_deref().and_then(parse_key_name),
+        privacy_mode: false,
         exit: false,
     };
+    if let Some(name) = cfg.privacy_key.as_deref() {
+        if app.privacy_key.is_none() {
+            eprintln!("keeby: privacy_key '{name}' not recognized — disabled");
+        }
+    }
 
     let mut event_loop: EventLoop<App> = EventLoop::try_new().expect("event loop");
     let loop_handle = event_loop.handle();
@@ -501,6 +513,23 @@ fn main() {
     loop_handle
         .insert_source(loop_chan, |ev, _, app: &mut App| {
             if let ChanEvent::Msg(msg) = ev {
+                // Privacy panic key: intercept BEFORE any state mutation.
+                if let (Some(pk), InputMsg::Press(k)) = (app.privacy_key, &msg) {
+                    if *k == pk {
+                        app.privacy_mode = !app.privacy_mode;
+                        if app.privacy_mode {
+                            app.keys.stream.clear();
+                            app.mouse = MouseState::new();
+                            app.draw_keys();
+                            app.draw_mouse();
+                        }
+                        return;
+                    }
+                }
+                if app.privacy_mode {
+                    return;
+                }
+
                 let mut redraw_keys = false;
                 let mut redraw_mouse = false;
                 match msg {

@@ -55,6 +55,9 @@ pub struct Config {
     pub auto_hide_keys_secs: f32,
     pub auto_hide_mouse: bool,
     pub auto_hide_mouse_secs: f32,
+
+    /// Name of the key that toggles privacy mode (drops all input until pressed again).
+    pub privacy_key: Option<String>,
 }
 
 impl Default for Config {
@@ -84,6 +87,7 @@ impl Default for Config {
             auto_hide_keys_secs: 4.0,
             auto_hide_mouse: false,
             auto_hide_mouse_secs: 6.0,
+            privacy_key: Some("Pause".to_string()),
         }
     }
 }
@@ -203,6 +207,17 @@ impl Config {
                         cfg.auto_hide_mouse_secs = n;
                     }
                 }
+                "privacy_key" => {
+                    let v = v.trim();
+                    cfg.privacy_key = if v.is_empty()
+                        || v.eq_ignore_ascii_case("none")
+                        || v.eq_ignore_ascii_case("off")
+                    {
+                        None
+                    } else {
+                        Some(v.to_string())
+                    };
+                }
                 _ => {}
             }
         }
@@ -306,6 +321,13 @@ auto_hide_keys      = true
 auto_hide_keys_secs = 4.0
 auto_hide_mouse     = false
 auto_hide_mouse_secs = 6.0
+
+# --- privacy panic key ---
+# pressing this key once stops keeby from registering ANY further keys/mouse;
+# pressing again resumes. set to `none` to disable. case-insensitive.
+# accepted: F1..F12, Pause, ScrollLock, Print, Insert, NumLock, Menu, CapsLock,
+#           or any single letter (a..z) / digit (0..9).
+privacy_key = Pause
 ";
     std::fs::write(path, body)
 }
