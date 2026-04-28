@@ -118,10 +118,11 @@ impl MouseRenderer {
     /// Surface dimensions for this widget (px).
     pub fn surface_size(&self) -> (u32, u32) {
         let s = self.size;
-        // Always allocate space for cursor + buttons row regardless of toggles
-        // so the layer surface size doesn't change at runtime.
+        // Long axis fits cursor + button cluster.
+        // Short axis is taller than `s` to leave room for the compass arrows
+        // that sit above/below the cursor disc.
         let long = s * 2.6;
-        let short = s;
+        let short = s * 1.4;
         match self.orientation {
             Orientation::Horizontal => (long.ceil() as u32, short.ceil() as u32),
             Orientation::Vertical => (short.ceil() as u32, long.ceil() as u32),
@@ -134,10 +135,11 @@ impl MouseRenderer {
         let s = self.size;
         let r = s * 0.42;
 
-        // Cursor and button-cluster centers, depending on orientation.
+        // Cursor sits inset from the leading edge so left/up compass arrows
+        // have room to extend past the disc without clipping.
         let (cx, cy, btn_cx, btn_cy) = match self.orientation {
-            Orientation::Horizontal => (s * 0.5, h * 0.5, s * 0.5 + s * 1.1, h * 0.5),
-            Orientation::Vertical => (w * 0.5, s * 0.5, w * 0.5, s * 0.5 + s * 1.1),
+            Orientation::Horizontal => (s * 0.65, h * 0.5, s * 0.65 + s * 1.1, h * 0.5),
+            Orientation::Vertical => (w * 0.5, s * 0.65, w * 0.5, s * 0.65 + s * 1.1),
         };
 
         // Cursor disc + ring (ring drawn thick & bright so widget stays visible
@@ -165,24 +167,26 @@ impl MouseRenderer {
             }
         }
 
-        // Scroll chevrons flanking the cursor.
+        // Compass arrows around the cursor — always visible at a dim base
+        // alpha, brighten when scroll fires in their direction.
         if self.show_scroll {
             let sv = state.scroll_v;
             let sh_ = state.scroll_h;
-            if sv.abs() > 0.05 {
-                let alpha = sv.abs().min(2.0) / 2.0;
-                let c = rgba(self.arrow.scale_alpha(alpha));
-                let cy_off = if sv > 0.0 { cy - r - s * 0.20 } else { cy + r + s * 0.20 };
-                let dir = if sv > 0.0 { -1.0 } else { 1.0 };
-                chevron_v(pixmap, cx, cy_off, s * 0.18, dir, c);
-            }
-            if sh_.abs() > 0.05 {
-                let alpha = sh_.abs().min(2.0) / 2.0;
-                let c = rgba(self.arrow.scale_alpha(alpha));
-                let cx_off = if sh_ > 0.0 { cx + r + s * 0.20 } else { cx - r - s * 0.20 };
-                let dir = if sh_ > 0.0 { 1.0 } else { -1.0 };
-                chevron_h(pixmap, cx_off, cy, s * 0.18, dir, c);
-            }
+            let base = 0.28;
+            let arrow_size = s * 0.10;
+            let dist = r + s * 0.07;
+            // Up: brightens with scroll_v > 0
+            let up_a = base + (sv.max(0.0).min(2.0) / 2.0) * (1.0 - base);
+            compass_arrow(pixmap, cx, cy - dist, arrow_size, Dir::Up, rgba(self.arrow.scale_alpha(up_a)));
+            // Down: brightens with scroll_v < 0
+            let down_a = base + ((-sv).max(0.0).min(2.0) / 2.0) * (1.0 - base);
+            compass_arrow(pixmap, cx, cy + dist, arrow_size, Dir::Down, rgba(self.arrow.scale_alpha(down_a)));
+            // Right: brightens with scroll_h > 0
+            let right_a = base + (sh_.max(0.0).min(2.0) / 2.0) * (1.0 - base);
+            compass_arrow(pixmap, cx + dist, cy, arrow_size, Dir::Right, rgba(self.arrow.scale_alpha(right_a)));
+            // Left: brightens with scroll_h < 0
+            let left_a = base + ((-sh_).max(0.0).min(2.0) / 2.0) * (1.0 - base);
+            compass_arrow(pixmap, cx - dist, cy, arrow_size, Dir::Left, rgba(self.arrow.scale_alpha(left_a)));
         }
 
         // Three buttons (LMB / MMB / RMB).
@@ -299,6 +303,45 @@ fn draw_arrow(pixmap: &mut Pixmap, from: (f32, f32), to: (f32, f32), thickness: 
     );
 }
 
+enum Dir { Up, Down, Left, Right }
+
+/// Filled isosceles triangle pointing outward at (cx, cy).
+fn compass_arrow(pixmap: &mut Pixmap, cx: f32, cy: f32, size: f32, dir: Dir, color: Color) {
+    let (tip, b1, b2) = match dir {
+        Dir::Up => (
+            (cx, cy - size),
+            (cx - size * 0.7, cy + size * 0.4),
+            (cx + size * 0.7, cy + size * 0.4),
+        ),
+        Dir::Down => (
+            (cx, cy + size),
+            (cx - size * 0.7, cy - size * 0.4),
+            (cx + size * 0.7, cy - size * 0.4),
+        ),
+        Dir::Left => (
+            (cx - size, cy),
+            (cx + size * 0.4, cy - size * 0.7),
+            (cx + size * 0.4, cy + size * 0.7),
+        ),
+        Dir::Right => (
+            (cx + size, cy),
+            (cx - size * 0.4, cy - size * 0.7),
+            (cx - size * 0.4, cy + size * 0.7),
+        ),
+    };
+    let mut p = PathBuilder::new();
+    p.move_to(tip.0, tip.1);
+    p.line_to(b1.0, b1.1);
+    p.line_to(b2.0, b2.1);
+    p.close();
+    let path = p.finish().unwrap();
+    let mut paint = Paint::default();
+    paint.set_color(color);
+    paint.anti_alias = true;
+    pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+}
+
+#[allow(dead_code)]
 fn chevron_v(pixmap: &mut Pixmap, cx: f32, cy: f32, size: f32, dir_y: f32, color: Color) {
     // dir_y = -1 points up, +1 points down
     let mut p = PathBuilder::new();
