@@ -1,7 +1,11 @@
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use evdev::{Device, EventType, InputEventKind, Key, RelativeAxisType};
+use inotify::{Inotify, WatchMask};
 
 #[derive(Debug, Clone, Copy)]
 pub enum InputMsg {
@@ -9,7 +13,7 @@ pub enum InputMsg {
     Release(Key),
     MouseMotion(i32, i32),
     MouseButton(MouseBtn, bool),
-    MouseScroll(i32, i32), // (vertical, horizontal); +up/right, -down/left
+    MouseScroll(i32, i32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,25 +25,6 @@ pub enum MouseBtn {
     Extra,
 }
 
-pub fn spawn(tx: Sender<InputMsg>) {
-    for (path, dev) in evdev::enumerate() {
-        let kind = device_kind(&dev);
-        if kind == DevKind::Other {
-            continue;
-        }
-        let tx = tx.clone();
-        let path_dbg = path.clone();
-        thread::Builder::new()
-            .name(format!("evdev-{}", path.display()))
-            .spawn(move || {
-                if let Err(e) = run_device(dev, kind, tx) {
-                    eprintln!("evdev {} ended: {e}", path_dbg.display());
-                }
-            })
-            .expect("spawn evdev thread");
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DevKind {
     Keyboard,
@@ -47,8 +32,56 @@ enum DevKind {
     Other,
 }
 
+/// Set of currently-watched device paths so hotplug events don't double-spawn.
+type Tracked = Arc<Mutex<std::collections::HashSet<PathBuf>>>;
+
+pub fn spawn(tx: Sender<InputMsg>) {
+    let tracked: Tracked = Arc::new(Mutex::new(Default::default()));
+
+    // Enumerate already-attached devices.
+    for (path, dev) in evdev::enumerate() {
+        try_spawn_device(&path, dev, &tx, &tracked);
+    }
+
+    // Watch /dev/input for new devices (replugs, USB hotplug, virtual KVM).
+    let tx_watch = tx.clone();
+    let tracked_watch = tracked.clone();
+    thread::Builder::new()
+        .name("evdev-hotplug".into())
+        .spawn(move || {
+            if let Err(e) = watch_hotplug(tx_watch, tracked_watch) {
+                eprintln!("keeby: hotplug watcher exited: {e}");
+            }
+        })
+        .expect("spawn hotplug watcher");
+}
+
+fn try_spawn_device(path: &Path, dev: Device, tx: &Sender<InputMsg>, tracked: &Tracked) {
+    let kind = device_kind(&dev);
+    if kind == DevKind::Other {
+        return;
+    }
+    {
+        let mut set = tracked.lock().unwrap();
+        if !set.insert(path.to_path_buf()) {
+            return; // already watching
+        }
+    }
+    let tx = tx.clone();
+    let tracked = tracked.clone();
+    let path_owned = path.to_path_buf();
+    thread::Builder::new()
+        .name(format!("evdev-{}", path.display()))
+        .spawn(move || {
+            let _ = run_device(dev, kind, tx);
+            // On exit (replug, EOF, perm-change): drop from tracked set so the
+            // next hotplug for the same path is allowed to re-spawn.
+            tracked.lock().unwrap().remove(&path_owned);
+        })
+        .expect("spawn evdev thread");
+}
+
 fn device_kind(dev: &Device) -> DevKind {
-    // Mouse: has REL_X + a mouse button.
     let has_rel_x = dev
         .supported_relative_axes()
         .map(|r| r.contains(RelativeAxisType::REL_X))
@@ -58,7 +91,6 @@ fn device_kind(dev: &Device) -> DevKind {
     if has_rel_x && has_btn_left {
         return DevKind::Mouse;
     }
-    // Keyboard: alpha keys + a modifier.
     if let Some(keys) = keys {
         if keys.contains(Key::KEY_A) && keys.contains(Key::KEY_Z) && keys.contains(Key::KEY_LEFTCTRL) {
             return DevKind::Keyboard;
@@ -127,6 +159,35 @@ fn run_device(mut dev: Device, kind: DevKind, tx: Sender<InputMsg>) -> std::io::
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+}
+
+fn watch_hotplug(tx: Sender<InputMsg>, tracked: Tracked) -> std::io::Result<()> {
+    let mut inotify = Inotify::init()?;
+    // CREATE: new event* file appears (USB plug-in).
+    // ATTRIB: udev usually sets perms in a separate step after CREATE — wait for it.
+    inotify
+        .watches()
+        .add("/dev/input", WatchMask::CREATE | WatchMask::ATTRIB)?;
+    let mut buf = [0u8; 4096];
+    loop {
+        let events = inotify.read_events_blocking(&mut buf)?;
+        for event in events {
+            let Some(name) = event.name else { continue };
+            let name_str = name.to_string_lossy();
+            if !name_str.starts_with("event") {
+                continue;
+            }
+            let path = PathBuf::from("/dev/input").join(name.to_owned());
+            // Re-check briefly because udev often sets perms after the inode appears.
+            for _ in 0..3 {
+                if let Ok(dev) = Device::open(&path) {
+                    try_spawn_device(&path, dev, &tx, &tracked);
+                    break;
+                }
+                thread::sleep(Duration::from_millis(120));
             }
         }
     }

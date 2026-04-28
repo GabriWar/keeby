@@ -15,6 +15,7 @@ calloop-wayland-source = "0.3"
 tiny-skia = "0.11"
 fontdue = "0.9"
 evdev = "0.12"
+inotify = { version = "0.11", default-features = false }
 
 [profile.release]
 opt-level = 3
