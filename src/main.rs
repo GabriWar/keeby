@@ -640,25 +640,6 @@ fn main() {
                         app.mouse.add_scroll(v, h);
                         app.last_mouse_activity = Instant::now();
                         redraw_mouse = true;
-                        // Also push a pill into the keys FIFO so scroll shows up
-                        // alongside keystrokes (handy for screencasts).
-                        let label = if v > 0 {
-                            Some("ScrollUp")
-                        } else if v < 0 {
-                            Some("ScrollDown")
-                        } else if h > 0 {
-                            Some("ScrollRight")
-                        } else if h < 0 {
-                            Some("ScrollLeft")
-                        } else {
-                            None
-                        };
-                        if let Some(l) = label {
-                            if app.keys.push_label(l, 250) {
-                                redraw_keys = true;
-                                app.last_keys_activity = Instant::now();
-                            }
-                        }
                     }
                 }
                 if redraw_keys {
