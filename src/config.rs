@@ -92,8 +92,6 @@ pub struct Config {
     pub mouse_arrow_color: Option<u32>,
 
     pub monitor: Option<String>,
-    pub auto_hide_keys: bool,
-    pub auto_hide_keys_secs: f32,
     pub auto_hide_mouse: bool,
     pub auto_hide_mouse_secs: f32,
 
@@ -130,8 +128,6 @@ impl Default for Config {
             mouse_show_scroll: true,
             mouse_arrow_color: None,
             monitor: None,
-            auto_hide_keys: true,
-            auto_hide_keys_secs: 4.0,
             auto_hide_mouse: false,
             auto_hide_mouse_secs: 6.0,
             privacy_key: Some("Pause".to_string()),
@@ -251,12 +247,8 @@ impl Config {
                         Some(v.to_string())
                     };
                 }
-                "auto_hide_keys" => cfg.auto_hide_keys = parse_bool(v),
-                "auto_hide_keys_secs" => {
-                    if let Ok(n) = v.parse::<f32>() {
-                        cfg.auto_hide_keys_secs = n;
-                    }
-                }
+                // Pills fade out on their own; kept so old configs still load.
+                "auto_hide_keys" | "auto_hide_keys_secs" => {}
                 "auto_hide_mouse" => cfg.auto_hide_mouse = parse_bool(v),
                 "auto_hide_mouse_secs" => {
                     if let Ok(n) = v.parse::<f32>() {
@@ -380,10 +372,9 @@ mouse_show_scroll   = true
 monitor = auto
 
 # --- auto-hide ---
-# attaches a null buffer after N seconds of no activity (no CPU/GPU cost while hidden)
-auto_hide_keys      = true
-auto_hide_keys_secs = 4.0
-auto_hide_mouse     = false
+# hide the mouse widget after N seconds without mouse activity (key pills
+# already fade out on their own after `life` seconds)
+auto_hide_mouse      = false
 auto_hide_mouse_secs = 6.0
 
 # --- privacy panic key ---
@@ -396,8 +387,8 @@ privacy_key = Pause
 # --- input device whitelist ---
 # Comma-separated list of substrings (case-insensitive). If set, only devices
 # whose name contains one of the substrings will be picked up. If empty,
-# every detected keyboard / mouse is used.
-# Run `keeby` once and check stderr — it prints every detected device's name.
+# every keyboard, mouse, touchpad and tablet is used.
+# Run `keeby --list` to see every device's name and what keeby makes of it.
 # Examples:
 #   keyboards = AT Translated, Corne
 #   mice      = Logitech, Razer

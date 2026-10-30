@@ -16,7 +16,7 @@ mod session;
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
+use calloop::channel::Sender;
 use std::time::Duration;
 
 use calloop::generic::Generic;

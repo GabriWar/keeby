@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, Stroke, Transform};
+use tiny_skia::{Color, FillRule, Paint, PathBuilder, PixmapMut, Stroke, Transform};
 
 use crate::config::{Config, Orientation, Rgba};
 use crate::input::MouseBtn;
@@ -129,7 +129,7 @@ impl MouseRenderer {
         }
     }
 
-    pub fn render(&self, pixmap: &mut Pixmap, state: &MouseState) {
+    pub fn render(&self, pixmap: &mut PixmapMut, state: &MouseState) {
         pixmap.fill(Color::TRANSPARENT);
         let (w, h) = (pixmap.width() as f32, pixmap.height() as f32);
         let s = self.size;
@@ -220,7 +220,7 @@ impl MouseRenderer {
 }
 
 fn button_rect(
-    pixmap: &mut Pixmap,
+    pixmap: &mut PixmapMut,
     x: f32,
     y: f32,
     w: f32,
@@ -243,7 +243,7 @@ fn rgba(c: Rgba) -> Color {
     Color::from_rgba(c.0, c.1, c.2, c.3).unwrap_or(Color::TRANSPARENT)
 }
 
-fn circle(pixmap: &mut Pixmap, cx: f32, cy: f32, r: f32, color: Color) {
+fn circle(pixmap: &mut PixmapMut, cx: f32, cy: f32, r: f32, color: Color) {
     let mut p = PathBuilder::new();
     p.push_circle(cx, cy, r);
     let path = p.finish().unwrap();
@@ -253,7 +253,7 @@ fn circle(pixmap: &mut Pixmap, cx: f32, cy: f32, r: f32, color: Color) {
     pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
 }
 
-fn ring(pixmap: &mut Pixmap, cx: f32, cy: f32, r: f32, w: f32, color: Color) {
+fn ring(pixmap: &mut PixmapMut, cx: f32, cy: f32, r: f32, w: f32, color: Color) {
     let mut p = PathBuilder::new();
     p.push_circle(cx, cy, r);
     let path = p.finish().unwrap();
@@ -269,7 +269,7 @@ fn ring(pixmap: &mut Pixmap, cx: f32, cy: f32, r: f32, w: f32, color: Color) {
 
 /// Single filled isosceles triangle: base centered at `from`, apex at `to`.
 /// Width at base scales with length (capped) so it looks like a proper arrow blade.
-fn draw_arrow(pixmap: &mut Pixmap, from: (f32, f32), to: (f32, f32), thickness: f32, color: Color) {
+fn draw_arrow(pixmap: &mut PixmapMut, from: (f32, f32), to: (f32, f32), thickness: f32, color: Color) {
     let dx = to.0 - from.0;
     let dy = to.1 - from.1;
     let len = (dx * dx + dy * dy).sqrt();
@@ -306,7 +306,7 @@ fn draw_arrow(pixmap: &mut Pixmap, from: (f32, f32), to: (f32, f32), thickness: 
 enum Dir { Up, Down, Left, Right }
 
 /// Filled isosceles triangle pointing outward at (cx, cy).
-fn compass_arrow(pixmap: &mut Pixmap, cx: f32, cy: f32, size: f32, dir: Dir, color: Color) {
+fn compass_arrow(pixmap: &mut PixmapMut, cx: f32, cy: f32, size: f32, dir: Dir, color: Color) {
     let (tip, b1, b2) = match dir {
         Dir::Up => (
             (cx, cy - size),
@@ -342,7 +342,7 @@ fn compass_arrow(pixmap: &mut Pixmap, cx: f32, cy: f32, size: f32, dir: Dir, col
 }
 
 #[allow(dead_code)]
-fn chevron_v(pixmap: &mut Pixmap, cx: f32, cy: f32, size: f32, dir_y: f32, color: Color) {
+fn chevron_v(pixmap: &mut PixmapMut, cx: f32, cy: f32, size: f32, dir_y: f32, color: Color) {
     // dir_y = -1 points up, +1 points down
     let mut p = PathBuilder::new();
     p.move_to(cx - size, cy + dir_y * (-size * 0.5));
@@ -361,23 +361,6 @@ fn chevron_v(pixmap: &mut Pixmap, cx: f32, cy: f32, size: f32, dir_y: f32, color
     pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
 }
 
-fn chevron_h(pixmap: &mut Pixmap, cx: f32, cy: f32, size: f32, dir_x: f32, color: Color) {
-    let mut p = PathBuilder::new();
-    p.move_to(cx + dir_x * (-size * 0.5), cy - size);
-    p.line_to(cx + dir_x * size * 0.5, cy);
-    p.line_to(cx + dir_x * (-size * 0.5), cy + size);
-    let path = p.finish().unwrap();
-    let mut paint = Paint::default();
-    paint.set_color(color);
-    paint.anti_alias = true;
-    let stroke = Stroke {
-        width: size * 0.3,
-        line_cap: tiny_skia::LineCap::Round,
-        line_join: tiny_skia::LineJoin::Round,
-        ..Default::default()
-    };
-    pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
-}
 
 fn rounded_rect(p: &mut PathBuilder, x: f32, y: f32, w: f32, h: f32, r: f32) {
     let r = r.min(w / 2.0).min(h / 2.0);

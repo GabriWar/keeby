@@ -4,7 +4,7 @@ use std::time::Instant;
 use evdev::Key;
 use fontdue::{Font, FontSettings, Metrics};
 use tiny_skia::{
-    Color, FillRule, Paint, PathBuilder, Pixmap, PremultipliedColorU8, Transform,
+    Color, FillRule, Paint, PathBuilder, PixmapMut, PremultipliedColorU8, Transform,
 };
 
 use crate::config::{Config, Rgba};
@@ -25,8 +25,6 @@ pub struct Pill {
 pub struct State {
     held: HashSet<Key>,
     pub stream: VecDeque<Pill>,
-    pub slide_offset: f32,
-    pub last_anim: Instant,
     pub life_secs: f32,
     pub fade_secs: f32,
 }
@@ -36,30 +34,9 @@ impl State {
         Self {
             held: HashSet::new(),
             stream: VecDeque::new(),
-            slide_offset: 0.0,
-            last_anim: Instant::now(),
             life_secs: cfg.pill_life_secs,
             fade_secs: cfg.pill_fade_secs,
         }
-    }
-
-    /// Push a synthetic labeled pill (e.g. "ScrollUp"). Dedups against the most
-    /// recent identical pill within `dedup_ms` so fast scroll wheels don't flood.
-    pub fn push_label(&mut self, text: &str, dedup_ms: u128) -> bool {
-        let now = Instant::now();
-        if let Some(last) = self.stream.back() {
-            if last.text == text && now.duration_since(last.created).as_millis() < dedup_ms {
-                return false;
-            }
-        }
-        self.stream.push_back(Pill {
-            text: text.to_string(),
-            created: now,
-        });
-        while self.stream.len() > MAX_PILLS {
-            self.stream.pop_front();
-        }
-        true
     }
 
     /// Returns `true` if a pill was pushed (non-modifier press).
@@ -102,9 +79,10 @@ impl State {
         before != self.stream.len()
     }
 
-    pub fn step_animation(&mut self) {
-        // No slide animation — pills snap into place. Only time-fade.
-        self.slide_offset = 0.0;
+    /// When the oldest pill starts fading, so a redraw can be scheduled.
+    pub fn next_fade(&self) -> Option<Instant> {
+        let lead = std::time::Duration::from_secs_f32((self.life_secs - self.fade_secs).max(0.0));
+        self.stream.front().map(|p| p.created + lead)
     }
 
     pub fn has_animation(&self) -> bool {
@@ -146,11 +124,6 @@ impl Renderer {
         }
     }
 
-    pub fn pill_width(&mut self, text: &str) -> f32 {
-        let text_w = self.measure(text).max(self.font_size * 0.8);
-        text_w + 2.0 * self.pill_pad_x
-    }
-
     fn measure(&mut self, text: &str) -> f32 {
         let mut w = 0.0;
         for ch in text.chars() {
@@ -165,7 +138,7 @@ impl Renderer {
 
     fn draw_text(
         &mut self,
-        pixmap: &mut Pixmap,
+        pixmap: &mut PixmapMut,
         x: f32,
         y_baseline: f32,
         text: &str,
@@ -194,7 +167,7 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self, pixmap: &mut Pixmap, state: &mut State) {
+    pub fn render(&mut self, pixmap: &mut PixmapMut, state: &mut State) {
         pixmap.fill(Color::TRANSPARENT);
         if state.stream.is_empty() {
             return;
@@ -241,7 +214,7 @@ impl Renderer {
 
     fn draw_pill(
         &mut self,
-        pixmap: &mut Pixmap,
+        pixmap: &mut PixmapMut,
         x: f32,
         y: f32,
         pw: f32,
@@ -321,7 +294,7 @@ fn rounded_rect(p: &mut PathBuilder, x: f32, y: f32, w: f32, h: f32, r: f32) {
 }
 
 fn blit_glyph(
-    pixmap: &mut Pixmap,
+    pixmap: &mut PixmapMut,
     x0: i32,
     y0: i32,
     gw: usize,

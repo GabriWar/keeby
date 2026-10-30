@@ -5,13 +5,13 @@ mod mouse;
 mod pointer;
 mod render;
 
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use calloop::channel::Event as ChanEvent;
 use calloop::timer::{TimeoutAction, Timer};
-use calloop::EventLoop;
+use calloop::{EventLoop, LoopHandle, RegistrationToken};
 use calloop_wayland_source::WaylandSource;
+use evdev::Key;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, Region},
     delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,
@@ -19,19 +19,19 @@ use smithay_client_toolkit::{
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     shell::{
-        wlr_layer::{
-            Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
-            LayerSurfaceConfigure,
-        },
+        wlr_layer::{Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
         WaylandSurface,
     },
-    shm::{slot::SlotPool, Shm, ShmHandler},
+    shm::{
+        slot::{Buffer, SlotPool},
+        Shm, ShmHandler,
+    },
 };
-use tiny_skia::Pixmap;
+use tiny_skia::PixmapMut;
 use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_output, wl_shm, wl_surface},
-    Connection, Proxy, QueueHandle,
+    Connection, QueueHandle,
 };
 
 use crate::config::{Anchor as CfgAnchor, Config};
@@ -39,43 +39,64 @@ use crate::input::{DeviceFilter, InputMsg};
 use crate::labels::parse_key_name;
 use crate::mouse::{MouseRenderer, MouseState};
 use crate::render::{Renderer, State as KeyState, HEIGHT, WIDTH};
-use evdev::Key;
 
-// ============================================================================
-// Output probe: dedicated tiny dispatch target for the initial output roundtrip.
-// We need wl_output `name` events processed before we can pick a monitor by name.
-// ============================================================================
-struct OutputProbe {
-    registry_state: RegistryState,
-    output_state: OutputState,
-}
-impl ProvidesRegistryState for OutputProbe {
-    fn registry(&mut self) -> &mut RegistryState {
-        &mut self.registry_state
-    }
-    registry_handlers![OutputState];
-}
-impl OutputHandler for OutputProbe {
-    fn output_state(&mut self) -> &mut OutputState {
-        &mut self.output_state
-    }
-    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-}
-delegate_output!(OutputProbe);
-delegate_registry!(OutputProbe);
-
-// ============================================================================
-// Main app
-// ============================================================================
+/// One overlay layer surface with two buffers it draws into in turn.
 struct Surface {
     layer: LayerSurface,
     configured: bool,
-    width: u32,
-    height: u32,
-    pixmap: Pixmap,
-    hidden: bool,
+    size: (u32, u32),
+    buffers: [Option<Buffer>; 2],
+    /// A frame callback is pending: draw on it instead of right away.
+    frame_pending: bool,
+    dirty: bool,
+}
+
+impl Surface {
+    fn new(layer: LayerSurface, size: (u32, u32)) -> Self {
+        Self { layer, configured: false, size, buffers: [None, None], frame_pending: false, dirty: false }
+    }
+
+    /// Draws into a free buffer (or a new one) and commits it. Reusing two
+    /// buffers saves creating a `wl_buffer` every frame.
+    fn draw(&mut self, pool: &mut SlotPool, qh: &QueueHandle<App>, animate: bool, paint: impl FnOnce(&mut PixmapMut)) {
+        if !self.configured {
+            return;
+        }
+        let (w, h) = self.size;
+        let stride = w as i32 * 4;
+        let free = self
+            .buffers
+            .iter()
+            .position(|b| b.as_ref().is_some_and(|b| b.height() == h as i32 && b.stride() == stride && b.canvas(pool).is_some()));
+        let slot = match free {
+            Some(i) => i,
+            None => {
+                let i = self.buffers.iter().position(Option::is_none).unwrap_or(0);
+                match pool.create_buffer(w as i32, h as i32, stride, wl_shm::Format::Abgr8888) {
+                    Ok((b, _)) => self.buffers[i] = Some(b),
+                    Err(e) => {
+                        eprintln!("keeby: create_buffer: {e}");
+                        return;
+                    }
+                }
+                i
+            }
+        };
+        let buffer = self.buffers[slot].as_ref().unwrap();
+        let Some(canvas) = buffer.canvas(pool) else { return };
+        if let Some(mut pix) = PixmapMut::from_bytes(canvas, w, h) {
+            paint(&mut pix);
+        }
+        let surface = self.layer.wl_surface();
+        surface.damage_buffer(0, 0, w as i32, h as i32);
+        if animate {
+            surface.frame(qh, surface.clone());
+            self.frame_pending = true;
+        }
+        buffer.attach_to(surface).expect("attach buffer");
+        surface.commit();
+        self.dirty = false;
+    }
 }
 
 struct App {
@@ -84,140 +105,132 @@ struct App {
     shm: Shm,
     pool: SlotPool,
     qh: QueueHandle<Self>,
+    loop_handle: LoopHandle<'static, App>,
 
     keys_surface: Surface,
     keys: KeyState,
     keys_renderer: Renderer,
-    last_keys_activity: Instant,
+    /// Wakes the keys overlay when the oldest pill starts fading.
+    fade_timer: Option<RegistrationToken>,
 
     mouse_surface: Option<Surface>,
     mouse: MouseState,
     mouse_renderer: Option<MouseRenderer>,
-    mouse_pending_frame: bool,
-    mouse_dirty: bool,
     last_mouse_activity: Instant,
-
-    cfg_auto_hide_keys: bool,
-    cfg_auto_hide_keys_secs: f32,
-    cfg_auto_hide_mouse: bool,
-    cfg_auto_hide_mouse_secs: f32,
+    auto_hide_mouse: Option<Duration>,
+    mouse_hidden: bool,
 
     privacy_key: Option<Key>,
     privacy_mode: bool,
     /// `keeby overlay off` hides the pills and the mouse widget; the pointer
     /// service keeps running.
     overlay_hidden: bool,
-
     exit: bool,
 }
 
 impl App {
     fn draw_keys(&mut self) {
-        let s = &mut self.keys_surface;
-        if !s.configured {
+        if self.keys_surface.frame_pending {
+            self.keys_surface.dirty = true;
             return;
         }
-        let stride = s.width as i32 * 4;
-        let (buffer, canvas) = match self.pool.create_buffer(
-            s.width as i32,
-            s.height as i32,
-            stride,
-            wl_shm::Format::Abgr8888,
-        ) {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("create_buffer (keys): {e}");
-                return;
-            }
-        };
-        self.keys_renderer.render(&mut s.pixmap, &mut self.keys);
-        let src = s.pixmap.data();
-        canvas[..src.len()].copy_from_slice(src);
-        let surface = s.layer.wl_surface();
-        surface.damage_buffer(0, 0, s.width as i32, s.height as i32);
-        if self.keys.has_animation() {
-            surface.frame(&self.qh, surface.clone());
+        let animate = self.keys.has_animation();
+        let (keys, renderer) = (&mut self.keys, &mut self.keys_renderer);
+        self.keys_surface.draw(&mut self.pool, &self.qh, animate, |pix| renderer.render(pix, keys));
+        if !animate {
+            self.schedule_fade();
         }
-        buffer.attach_to(surface).expect("attach buffer");
-        surface.commit();
-        s.hidden = false;
+    }
+
+    /// Pills fade on frame callbacks; this wakes the overlay when the oldest
+    /// one should start fading, so nothing lingers while no key is pressed.
+    fn schedule_fade(&mut self) {
+        if let Some(tok) = self.fade_timer.take() {
+            self.loop_handle.remove(tok);
+        }
+        let Some(at) = self.keys.next_fade() else { return };
+        self.fade_timer = self
+            .loop_handle
+            .insert_source(Timer::from_deadline(at), |_, _, app: &mut App| {
+                app.fade_timer = None;
+                app.keys.prune();
+                app.draw_keys();
+                TimeoutAction::Drop
+            })
+            .ok();
     }
 
     fn draw_mouse(&mut self) {
-        let (Some(s), Some(renderer)) = (self.mouse_surface.as_mut(), self.mouse_renderer.as_ref())
-        else {
-            return;
-        };
-        if !s.configured {
+        let (Some(s), Some(renderer)) = (self.mouse_surface.as_mut(), self.mouse_renderer.as_ref()) else { return };
+        if s.frame_pending {
+            s.dirty = true;
             return;
         }
-        let stride = s.width as i32 * 4;
-        let (buffer, canvas) = match self.pool.create_buffer(
-            s.width as i32,
-            s.height as i32,
-            stride,
-            wl_shm::Format::Abgr8888,
-        ) {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("create_buffer (mouse): {e}");
+        let (state, hidden) = (&self.mouse, self.mouse_hidden);
+        s.draw(&mut self.pool, &self.qh, !hidden, |pix| {
+            if hidden {
+                pix.fill(tiny_skia::Color::TRANSPARENT);
+            } else {
+                renderer.render(pix, state);
+            }
+        });
+    }
+
+    fn mouse_activity(&mut self) {
+        self.last_mouse_activity = Instant::now();
+        self.mouse_hidden = false;
+        self.draw_mouse();
+    }
+
+    fn clear(&mut self) {
+        self.keys.stream.clear();
+        self.mouse = MouseState::new();
+        self.draw_keys();
+        self.draw_mouse();
+    }
+
+    fn on_input(&mut self, msg: InputMsg) {
+        if let InputMsg::SetOverlay(show) = msg {
+            self.overlay_hidden = !show.unwrap_or(self.overlay_hidden);
+            if self.overlay_hidden {
+                self.clear();
+            }
+            return;
+        }
+        // The privacy key toggles capture before anything is recorded.
+        if let (Some(pk), InputMsg::Press(k)) = (self.privacy_key, msg) {
+            if k == pk {
+                self.privacy_mode = !self.privacy_mode;
+                if self.privacy_mode {
+                    self.clear();
+                }
                 return;
             }
-        };
-        renderer.render(&mut s.pixmap, &self.mouse);
-        let src2 = s.pixmap.data();
-        canvas[..src2.len()].copy_from_slice(src2);
-        let surface = s.layer.wl_surface();
-        surface.damage_buffer(0, 0, s.width as i32, s.height as i32);
-        surface.frame(&self.qh, surface.clone());
-        buffer.attach_to(surface).expect("attach buffer");
-        surface.commit();
-        self.mouse_pending_frame = true;
-        self.mouse_dirty = false;
-        s.hidden = false;
-    }
-
-    fn hide_keys(&mut self) {
-        if self.keys_surface.hidden {
+        }
+        if self.privacy_mode || self.overlay_hidden {
             return;
         }
-        let surface = self.keys_surface.layer.wl_surface();
-        surface.attach(None, 0, 0);
-        surface.commit();
-        self.keys_surface.hidden = true;
-    }
-
-    fn hide_mouse(&mut self) {
-        let Some(ms) = self.mouse_surface.as_mut() else {
-            return;
-        };
-        if ms.hidden {
-            return;
+        match msg {
+            InputMsg::Press(k) => {
+                if self.keys.press(k) {
+                    self.draw_keys();
+                }
+            }
+            InputMsg::Release(k) => self.keys.release(k),
+            InputMsg::MouseMotion(dx, dy) => {
+                self.mouse.add_motion(dx, dy);
+                self.mouse_activity();
+            }
+            InputMsg::MouseButton(b, pressed) => {
+                self.mouse.set_button(b, pressed);
+                self.mouse_activity();
+            }
+            InputMsg::MouseScroll(v, h) => {
+                self.mouse.add_scroll(v, h);
+                self.mouse_activity();
+            }
+            InputMsg::SetOverlay(_) => {}
         }
-        let surface = ms.layer.wl_surface();
-        surface.attach(None, 0, 0);
-        surface.commit();
-        ms.hidden = true;
-    }
-
-    fn check_auto_hide(&mut self) {
-        // Null-buffer attach causes Hyprland to drop the layer from its list and
-        // re-attaching doesn't always restore it cleanly. Instead we rely on the
-        // natural fade: once `stream` empties, render() paints fully transparent,
-        // so the surface stays mapped but invisible. No CPU cost beyond the one
-        // final transparent frame.
-        let _ = self.last_keys_activity;
-        let _ = self.last_mouse_activity;
-    }
-
-    fn is_keys_surface(&self, surf: &wl_surface::WlSurface) -> bool {
-        self.keys_surface.layer.wl_surface().id() == surf.id()
-    }
-    fn is_mouse_surface(&self, surf: &wl_surface::WlSurface) -> bool {
-        self.mouse_surface
-            .as_ref()
-            .map(|s| s.layer.wl_surface().id() == surf.id())
-            .unwrap_or(false)
     }
 }
 
@@ -225,16 +238,14 @@ impl CompositorHandler for App {
     fn scale_factor_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: i32) {}
     fn transform_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: wl_output::Transform) {}
     fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, surf: &wl_surface::WlSurface, _: u32) {
-        if self.is_keys_surface(surf) {
-            self.keys.step_animation();
-            let pruned = self.keys.prune();
-            if pruned || self.keys.has_animation() {
-                self.draw_keys();
-            }
-        } else if self.is_mouse_surface(surf) {
-            self.mouse_pending_frame = false;
+        if self.keys_surface.layer.wl_surface() == surf {
+            self.keys_surface.frame_pending = false;
+            self.keys.prune();
+            self.draw_keys();
+        } else if let Some(ms) = self.mouse_surface.as_mut().filter(|m| m.layer.wl_surface() == surf) {
+            ms.frame_pending = false;
             self.mouse.step();
-            if self.mouse_dirty || self.mouse.has_animation() {
+            if ms.dirty || self.mouse.has_animation() {
                 self.draw_mouse();
             }
         }
@@ -263,43 +274,20 @@ impl LayerShellHandler for App {
         self.exit = true;
     }
 
-    fn configure(
-        &mut self,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-        layer: &LayerSurface,
-        configure: LayerSurfaceConfigure,
-        _: u32,
-    ) {
-        let surf_id = layer.wl_surface().id();
-        let (w, h) = configure.new_size;
-        if surf_id == self.keys_surface.layer.wl_surface().id() {
-            let s = &mut self.keys_surface;
-            if w != 0 {
-                s.width = w;
-            }
-            if h != 0 {
-                s.height = h;
-            }
-            if s.pixmap.width() != s.width || s.pixmap.height() != s.height {
-                s.pixmap = Pixmap::new(s.width, s.height).expect("pixmap");
+    fn configure(&mut self, _: &Connection, _: &QueueHandle<Self>, layer: &LayerSurface, configure: LayerSurfaceConfigure, _: u32) {
+        let apply = |s: &mut Surface| {
+            let (w, h) = configure.new_size;
+            if w != 0 && h != 0 {
+                s.size = (w, h);
             }
             s.configured = true;
+        };
+        if &self.keys_surface.layer == layer {
+            apply(&mut self.keys_surface);
             self.draw_keys();
-        } else if let Some(ms) = self.mouse_surface.as_mut() {
-            if surf_id == ms.layer.wl_surface().id() {
-                if w != 0 {
-                    ms.width = w;
-                }
-                if h != 0 {
-                    ms.height = h;
-                }
-                if ms.pixmap.width() != ms.width || ms.pixmap.height() != ms.height {
-                    ms.pixmap = Pixmap::new(ms.width, ms.height).expect("pixmap");
-                }
-                ms.configured = true;
-                self.draw_mouse();
-            }
+        } else if let Some(ms) = self.mouse_surface.as_mut().filter(|m| &m.layer == layer) {
+            apply(ms);
+            self.draw_mouse();
         }
     }
 }
@@ -346,356 +334,188 @@ fn anchor_margins(a: CfgAnchor, mx: i32, my: i32) -> (i32, i32, i32, i32) {
 }
 
 fn print_help() {
-    println!("keeby — Wayland keyboard and mouse overlay, and keyboard-driven pointer\n");
+    println!("keeby — your keyboard and mouse on screen, and the pointer from the keyboard\n");
     println!("USAGE:");
-    println!("    keeby            run the overlay and the pointer service (default)");
-    println!("    keeby point ...  move, click and drag the pointer from the keyboard");
-    println!("                     (`keeby point --help` for its options)");
-    println!("    keeby overlay [toggle|on|off]");
-    println!("                     hide or show the overlay of the running keeby");
-    println!("    keeby --list     list keyboards, mice, and monitors, then exit");
-    println!("    keeby --help     show this message\n");
+    println!("    keeby                          run the overlay and the pointer service");
+    println!("    keeby point [OPTION...]        move, click and drag the pointer from the keyboard");
+    println!("                                   (`keeby point --help` for its options)");
+    println!("    keeby overlay [toggle|on|off]  hide or show the overlay of the running keeby");
+    println!("    keeby --list                   input devices and monitors keeby can see");
+    println!("    keeby --help                   this message\n");
     println!("CONFIG:  ~/.config/keeby/config.conf");
     println!("REPO:    https://github.com/GabriWar/keeby");
 }
 
 fn run_list() {
-    use crate::input::{list_devices, DevKind};
-    println!("=== KEYBOARDS ===");
-    let devs = list_devices();
-    let mut found_kbd = false;
-    for (path, name, kind) in &devs {
-        if matches!(kind, DevKind::Keyboard) {
-            println!("  {}\t{}", path.display(), name);
-            found_kbd = true;
-        }
+    println!("=== INPUT DEVICES ===");
+    for (path, name, caps) in input::list_devices() {
+        let kind = if caps.is_empty() { "-".to_string() } else { caps.names().join("+") };
+        println!("  {:<20} {:<18} {}", path.display(), kind, name);
     }
-    if !found_kbd { println!("  (none detected)"); }
-
-    println!("\n=== MICE ===");
-    let mut found_mouse = false;
-    for (path, name, kind) in &devs {
-        if matches!(kind, DevKind::Mouse) {
-            println!("  {}\t{}", path.display(), name);
-            found_mouse = true;
-        }
-    }
-    if !found_mouse { println!("  (none detected)"); }
-
     println!("\n=== MONITORS ===");
     match list_monitors() {
-        Ok(list) if !list.is_empty() => {
-            for name in list {
-                println!("  {name}");
-            }
-        }
+        Ok(list) if !list.is_empty() => list.iter().for_each(|n| println!("  {n}")),
         Ok(_) => println!("  (none — no Wayland session?)"),
         Err(e) => println!("  error: {e}"),
     }
-
     println!(
-        "\nTo whitelist devices, paste names into ~/.config/keeby/config.conf:\n  keyboards = AT Translated, Corne\n  mice      = Logitech, Razer\n  monitor   = eDP-1"
+        "\nTo use only some devices, put name parts in ~/.config/keeby/config.conf:\n  keyboards = AT Translated, Corne\n  mice      = Logitech, ELAN\n  monitor   = eDP-1"
     );
 }
 
+/// Just the outputs, to list them or pick one by name before creating
+/// surfaces.
+struct OutputProbe {
+    registry_state: RegistryState,
+    output_state: OutputState,
+}
+impl ProvidesRegistryState for OutputProbe {
+    fn registry(&mut self) -> &mut RegistryState {
+        &mut self.registry_state
+    }
+    registry_handlers![OutputState];
+}
+impl OutputHandler for OutputProbe {
+    fn output_state(&mut self) -> &mut OutputState {
+        &mut self.output_state
+    }
+    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+}
+delegate_output!(OutputProbe);
+delegate_registry!(OutputProbe);
+
 fn list_monitors() -> Result<Vec<String>, String> {
     let conn = Connection::connect_to_env().map_err(|e| e.to_string())?;
-    let (globals, _eq) = registry_queue_init::<OutputProbe>(&conn).map_err(|e| e.to_string())?;
-    let mut probe_eq = conn.new_event_queue::<OutputProbe>();
-    let probe_qh = probe_eq.handle();
-    let mut probe = OutputProbe {
-        registry_state: RegistryState::new(&globals),
-        output_state: OutputState::new(&globals, &probe_qh),
-    };
-    probe_eq.roundtrip(&mut probe).map_err(|e| e.to_string())?;
-    probe_eq.roundtrip(&mut probe).map_err(|e| e.to_string())?;
-    let mut names = Vec::new();
-    for o in probe.output_state.outputs() {
-        if let Some(info) = probe.output_state.info(&o) {
-            if let Some(n) = info.name {
-                names.push(n);
-            }
-        }
-    }
-    Ok(names)
+    let (globals, mut queue) = registry_queue_init::<OutputProbe>(&conn).map_err(|e| e.to_string())?;
+    let qh = queue.handle();
+    let mut probe = OutputProbe { registry_state: RegistryState::new(&globals), output_state: OutputState::new(&globals, &qh) };
+    queue.roundtrip(&mut probe).map_err(|e| e.to_string())?;
+    queue.roundtrip(&mut probe).map_err(|e| e.to_string())?;
+    Ok(probe.output_state.outputs().filter_map(|o| probe.output_state.info(&o)?.name).collect())
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if matches!(args.first().map(String::as_str), Some("point" | "kbptr")) {
-        std::process::exit(pointer::run_cli(&args[1..]));
-    }
-    if args.first().map(String::as_str) == Some("overlay") {
-        std::process::exit(pointer::overlay_cli(args.get(1).map(String::as_str)));
-    }
-    if args.iter().any(|a| a == "-h" || a == "--help" || a == "help") {
-        print_help();
-        return;
-    }
-    if args.iter().any(|a| a == "-l" || a == "--list" || a == "list") {
-        run_list();
-        return;
+    match args.first().map(String::as_str) {
+        Some("point" | "kbptr") => std::process::exit(pointer::run_cli(&args[1..])),
+        Some("overlay") => std::process::exit(pointer::overlay_cli(args.get(1).map(String::as_str))),
+        Some("-h" | "--help" | "help") => return print_help(),
+        Some("-l" | "--list" | "list") => return run_list(),
+        _ => {}
     }
 
     let cfg = Config::load();
-
     let conn = Connection::connect_to_env().expect("connect wayland");
-    let (globals, event_queue) = registry_queue_init::<App>(&conn).expect("registry init");
-    let qh: QueueHandle<App> = event_queue.handle();
+    let (globals, mut queue) = registry_queue_init::<App>(&conn).expect("registry init");
+    let qh: QueueHandle<App> = queue.handle();
 
-    // ----- Probe outputs on a separate queue so we can pick a monitor by name. -----
-    let target_output = {
-        let mut probe_eq = conn.new_event_queue::<OutputProbe>();
-        let probe_qh = probe_eq.handle();
-        let mut probe = OutputProbe {
-            registry_state: RegistryState::new(&globals),
-            output_state: OutputState::new(&globals, &probe_qh),
-        };
-        // Two roundtrips: first to get the wl_output proxies, second to receive name/info.
-        probe_eq.roundtrip(&mut probe).expect("probe roundtrip 1");
-        probe_eq.roundtrip(&mut probe).expect("probe roundtrip 2");
-
-        if let Some(name) = cfg.monitor.as_deref() {
-            let found = probe.output_state.outputs().find(|o| {
-                probe
-                    .output_state
-                    .info(o)
-                    .and_then(|i| i.name)
-                    .as_deref()
-                    == Some(name)
-            });
-            if found.is_none() {
-                eprintln!(
-                    "keeby: monitor '{name}' not found. available: {}",
-                    probe
-                        .output_state
-                        .outputs()
-                        .filter_map(|o| probe.output_state.info(&o).and_then(|i| i.name))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-            found
-        } else {
-            None
+    // Pick the monitor by name before creating surfaces on it.
+    let target_output = cfg.monitor.as_deref().and_then(|name| {
+        let mut pq = conn.new_event_queue::<OutputProbe>();
+        let pqh = pq.handle();
+        let mut probe = OutputProbe { registry_state: RegistryState::new(&globals), output_state: OutputState::new(&globals, &pqh) };
+        pq.roundtrip(&mut probe).ok()?;
+        pq.roundtrip(&mut probe).ok()?;
+        let found = probe.output_state.outputs().find(|o| probe.output_state.info(o).and_then(|i| i.name).as_deref() == Some(name));
+        if found.is_none() {
+            eprintln!("keeby: monitor '{name}' not found, using the focused one");
         }
-    };
+        found
+    });
 
-    let compositor_state = CompositorState::bind(&globals, &qh).expect("compositor not available");
+    let compositor = CompositorState::bind(&globals, &qh).expect("wl_compositor not available");
     let layer_shell = LayerShell::bind(&globals, &qh).expect("wlr-layer-shell not available");
-    let shm = Shm::bind(&globals, &qh).expect("shm not available");
+    let shm = Shm::bind(&globals, &qh).expect("wl_shm not available");
 
-    // Keys surface.
-    let keys_surf = compositor_state.create_surface(&qh);
-    let region = Region::new(&compositor_state).expect("region");
-    keys_surf.set_input_region(Some(region.wl_region()));
-    let keys_layer = layer_shell.create_layer_surface(
-        &qh,
-        keys_surf,
-        Layer::Overlay,
-        Some("keeby"),
-        target_output.as_ref(),
-    );
-    keys_layer.set_anchor(Anchor::BOTTOM);
-    keys_layer.set_size(WIDTH, HEIGHT);
-    keys_layer.set_margin(0, 0, cfg.margin_bottom, 0);
-    keys_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-    keys_layer.set_exclusive_zone(-1);
-    keys_layer.commit();
-    let keys_pixmap = Pixmap::new(WIDTH, HEIGHT).expect("pixmap");
-
-    // Mouse surface (optional).
-    let mouse_renderer = if cfg.mouse_enabled {
-        Some(MouseRenderer::new(&cfg))
-    } else {
-        None
-    };
-    let mouse_surface = if let Some(r) = mouse_renderer.as_ref() {
-        let (mw, mh) = r.surface_size();
-        let surf = compositor_state.create_surface(&qh);
-        let region2 = Region::new(&compositor_state).expect("region2");
-        surf.set_input_region(Some(region2.wl_region()));
-        let layer = layer_shell.create_layer_surface(
-            &qh,
-            surf,
-            Layer::Overlay,
-            Some("keeby-mouse"),
-            target_output.as_ref(),
-        );
-        layer.set_anchor(anchor_to_wlr(cfg.mouse_anchor));
-        layer.set_size(mw, mh);
-        let (t, ri, b, l) = anchor_margins(cfg.mouse_anchor, cfg.mouse_margin_x, cfg.mouse_margin_y);
-        layer.set_margin(t, ri, b, l);
+    let make_layer = |name: &str, anchor: Anchor, size: (u32, u32), (top, right, bottom, left): (i32, i32, i32, i32)| {
+        let surface = compositor.create_surface(&qh);
+        let region = Region::new(&compositor).expect("region");
+        surface.set_input_region(Some(region.wl_region()));
+        let layer = layer_shell.create_layer_surface(&qh, surface, Layer::Overlay, Some(name), target_output.as_ref());
+        layer.set_anchor(anchor);
+        layer.set_size(size.0, size.1);
+        layer.set_margin(top, right, bottom, left);
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
         layer.set_exclusive_zone(-1);
         layer.commit();
-        let pixmap = Pixmap::new(mw, mh).expect("mouse pixmap");
-        Some(Surface {
-            layer,
-            configured: false,
-            width: mw,
-            height: mh,
-            pixmap,
-            hidden: false,
-        })
-    } else {
-        None
+        Surface::new(layer, size)
     };
 
-    let mouse_bytes = mouse_surface
-        .as_ref()
-        .map(|s| s.width * s.height * 4)
-        .unwrap_or(0) as usize;
-    let pool_size = (WIDTH * HEIGHT * 4) as usize * 2 + mouse_bytes * 2 + 4096;
-    let pool = SlotPool::new(pool_size, &shm).expect("slot pool");
+    let keys_surface = make_layer("keeby", Anchor::BOTTOM, (WIDTH, HEIGHT), (0, 0, cfg.margin_bottom, 0));
+    let mouse_renderer = cfg.mouse_enabled.then(|| MouseRenderer::new(&cfg));
+    let mouse_surface = mouse_renderer.as_ref().map(|r| {
+        let margins = anchor_margins(cfg.mouse_anchor, cfg.mouse_margin_x, cfg.mouse_margin_y);
+        make_layer("keeby-mouse", anchor_to_wlr(cfg.mouse_anchor), r.surface_size(), margins)
+    });
+    let mouse_bytes = mouse_surface.as_ref().map_or(0, |s| s.size.0 * s.size.1 * 4) as usize;
+    let pool = SlotPool::new((WIDTH * HEIGHT * 4) as usize * 2 + mouse_bytes * 2, &shm).expect("slot pool");
 
+    let mut event_loop: EventLoop<'static, App> = EventLoop::try_new().expect("event loop");
+    let handle = event_loop.handle();
+
+    let privacy_key = cfg.privacy_key.as_deref().and_then(parse_key_name);
+    if let (Some(name), None) = (cfg.privacy_key.as_deref(), privacy_key) {
+        eprintln!("keeby: privacy_key '{name}' not recognized — disabled");
+    }
     let mut app = App {
         registry_state: RegistryState::new(&globals),
         output_state: OutputState::new(&globals, &qh),
         shm,
         pool,
         qh: qh.clone(),
-        keys_surface: Surface {
-            layer: keys_layer,
-            configured: false,
-            width: WIDTH,
-            height: HEIGHT,
-            pixmap: keys_pixmap,
-            hidden: false,
-        },
+        loop_handle: handle.clone(),
+        keys_surface,
         keys: KeyState::new(&cfg),
         keys_renderer: Renderer::new(&cfg),
-        last_keys_activity: Instant::now(),
+        fade_timer: None,
         mouse_surface,
         mouse: MouseState::new(),
         mouse_renderer,
-        mouse_pending_frame: false,
-        mouse_dirty: false,
         last_mouse_activity: Instant::now(),
-        cfg_auto_hide_keys: cfg.auto_hide_keys,
-        cfg_auto_hide_keys_secs: cfg.auto_hide_keys_secs,
-        cfg_auto_hide_mouse: cfg.auto_hide_mouse,
-        cfg_auto_hide_mouse_secs: cfg.auto_hide_mouse_secs,
-        privacy_key: cfg.privacy_key.as_deref().and_then(parse_key_name),
+        auto_hide_mouse: cfg.auto_hide_mouse.then(|| Duration::from_secs_f32(cfg.auto_hide_mouse_secs)),
+        mouse_hidden: false,
+        privacy_key,
         privacy_mode: false,
         overlay_hidden: false,
         exit: false,
     };
-    if let Some(name) = cfg.privacy_key.as_deref() {
-        if app.privacy_key.is_none() {
-            eprintln!("keeby: privacy_key '{name}' not recognized — disabled");
-        }
+
+    queue.roundtrip(&mut app).expect("roundtrip");
+    WaylandSource::new(conn.clone(), queue).insert(handle.clone()).expect("insert wayland source");
+
+    let filter = DeviceFilter::from_lists(&cfg.keyboard_names, &cfg.mouse_names);
+    if let Err(e) = input::watch(&handle, filter, |app: &mut App, msg| app.on_input(msg)) {
+        eprintln!("keeby: can't watch input devices: {e}");
     }
 
-    let mut event_loop: EventLoop<App> = EventLoop::try_new().expect("event loop");
-    let loop_handle = event_loop.handle();
-
-    WaylandSource::new(conn.clone(), event_queue)
-        .insert(loop_handle.clone())
-        .expect("insert wayland source");
-
-    let (mpsc_tx, mpsc_rx) = mpsc::channel::<InputMsg>();
-    pointer::spawn_daemon(mpsc_tx.clone());
-    let filter = DeviceFilter::from_lists(&cfg.keyboard_names, &cfg.mouse_names);
-    input::spawn(mpsc_tx, filter);
-
-    let (loop_tx, loop_chan) = calloop::channel::channel::<InputMsg>();
-    std::thread::spawn(move || {
-        while let Ok(msg) = mpsc_rx.recv() {
-            if loop_tx.send(msg).is_err() {
-                break;
-            }
-        }
-    });
-
-    loop_handle
-        .insert_source(loop_chan, |ev, _, app: &mut App| {
+    // The pointer service runs on its own thread with its own Wayland
+    // connection; keys typed into it come back here as pills.
+    let (pills_tx, pills_rx) = calloop::channel::channel::<InputMsg>();
+    handle
+        .insert_source(pills_rx, |ev, _, app: &mut App| {
             if let ChanEvent::Msg(msg) = ev {
-                if let InputMsg::SetOverlay(show) = msg {
-                    app.overlay_hidden = !show.unwrap_or(app.overlay_hidden);
-                    if app.overlay_hidden {
-                        app.keys.stream.clear();
-                        app.mouse = MouseState::new();
-                        app.draw_keys();
-                        app.draw_mouse();
-                    }
-                    return;
-                }
-                if app.overlay_hidden {
-                    return;
-                }
-                // Privacy panic key: intercept BEFORE any state mutation.
-                if let (Some(pk), InputMsg::Press(k)) = (app.privacy_key, &msg) {
-                    if *k == pk {
-                        app.privacy_mode = !app.privacy_mode;
-                        if app.privacy_mode {
-                            app.keys.stream.clear();
-                            app.mouse = MouseState::new();
-                            app.draw_keys();
-                            app.draw_mouse();
-                        }
-                        return;
-                    }
-                }
-                if app.privacy_mode {
-                    return;
-                }
-
-                let mut redraw_keys = false;
-                let mut redraw_mouse = false;
-                match msg {
-                    InputMsg::Press(k) => {
-                        if app.keys.press(k) {
-                            redraw_keys = true;
-                            app.last_keys_activity = Instant::now();
-                        }
-                    }
-                    InputMsg::Release(k) => {
-                        app.keys.release(k);
-                    }
-                    InputMsg::MouseMotion(dx, dy) => {
-                        app.mouse.add_motion(dx, dy);
-                        if dx.abs() + dy.abs() > 1 {
-                            app.last_mouse_activity = Instant::now();
-                        }
-                        redraw_mouse = true;
-                    }
-                    InputMsg::MouseButton(b, pressed) => {
-                        app.mouse.set_button(b, pressed);
-                        app.last_mouse_activity = Instant::now();
-                        redraw_mouse = true;
-                    }
-                    InputMsg::MouseScroll(v, h) => {
-                        app.mouse.add_scroll(v, h);
-                        app.last_mouse_activity = Instant::now();
-                        redraw_mouse = true;
-                    }
-                    InputMsg::SetOverlay(_) => {}
-                }
-                if redraw_keys {
-                    app.draw_keys();
-                }
-                if redraw_mouse {
-                    app.mouse_dirty = true;
-                    if !app.mouse_pending_frame {
-                        app.draw_mouse();
-                    }
-                }
+                app.on_input(msg);
             }
         })
-        .expect("insert channel source");
+        .expect("insert pointer channel");
+    pointer::spawn_daemon(pills_tx);
 
-    // Auto-hide poller (cheap, every 500ms).
-    loop_handle
-        .insert_source(Timer::immediate(), |_deadline, _, app: &mut App| {
-            app.check_auto_hide();
-            TimeoutAction::ToDuration(Duration::from_millis(500))
-        })
-        .expect("insert auto-hide timer");
+    if let Some(after) = app.auto_hide_mouse {
+        handle
+            .insert_source(Timer::from_duration(after), move |_, _, app: &mut App| {
+                let idle = app.last_mouse_activity.elapsed();
+                if idle >= after && !app.mouse_hidden {
+                    app.mouse_hidden = true;
+                    app.draw_mouse();
+                }
+                TimeoutAction::ToDuration(after.saturating_sub(idle).max(Duration::from_millis(250)))
+            })
+            .expect("insert auto-hide timer");
+    }
 
     while !app.exit {
-        event_loop
-            .dispatch(Some(Duration::from_millis(33)), &mut app)
-            .expect("event loop dispatch");
+        event_loop.dispatch(None, &mut app).expect("event loop dispatch");
     }
 }

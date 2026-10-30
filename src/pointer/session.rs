@@ -4,7 +4,7 @@
 //! the keeby daemon) that runs selection sessions on request.
 
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
-use std::sync::mpsc::Sender;
+use calloop::channel::Sender;
 use std::time::{Duration, Instant};
 
 use calloop::generic::Generic;

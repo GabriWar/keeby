@@ -18,7 +18,7 @@ Both run in one daemon, share one theme, and the keys you type into the pointer 
 - **Keystroke stream**: every press appears as a pill, the oldest scrolls left and fades after a few seconds
 - **Chord pills**: `Ctrl+Shift+A` is one pill, not three; modifier-only presses don't clutter the stream
 - **Mouse widget**: cursor disc with a motion arrow, button cells that light on click, scroll chevrons
-- **Hot-plug**: plug, unplug, switch a KVM or wake a Bluetooth keyboard without restarting
+- **Any input**: keyboards, mice, touchpads (motion, two-finger scroll, taps, clickpad clicks), tablets and virtual devices; hot-plug without restarting
 - **Device whitelist**: pick keyboards and mice by name when a headset's media keys get in the way
 - **Privacy key**: one tap (default `Pause`) stops capturing and clears the screen, another tap resumes
 
@@ -113,7 +113,8 @@ mouse_enabled = true
 mouse_anchor  = bottom-left   # top-left, top, top-right, left, center, right, bottom-left, bottom, bottom-right
 monitor = auto                # or eDP-1, HDMI-A-1, ...
 keyboards =                   # whitelist by name substring, empty = all
-mice      =
+mice      =                   # also applies to touchpads and tablets
+auto_hide_mouse = false       # hide the mouse widget after auto_hide_mouse_secs idle
 privacy_key = Pause
 
 # --- pointer: `section.key = value`, same names as wl-kbptr ---
@@ -128,7 +129,8 @@ Colors take `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`. `keeby point --help-confi
 ## How it works
 
 - Two event loops, one Wayland connection each: the overlay (keys and mouse widget) and the pointer service, which listens on `$XDG_RUNTIME_DIR/keeby-point.sock`
-- Click-through layer surfaces with an empty input region, drawn with `tiny-skia` and `fontdue` straight into `wl_shm` buffers, frame-callback paced
+- Input devices and hotplug (`inotify` on `/dev/input`) are sources in the overlay's event loop: no reader threads. Devices are classified by capability, so a keyboard with mouse keys is both, and touchpads get motion, two-finger scrolling, taps and clickpad clicks from their raw contacts
+- Click-through layer surfaces with an empty input region, drawn with `tiny-skia` and `fontdue` straight into two reused `wl_shm` buffers per surface, frame-callback paced; a timer wakes the key overlay exactly when a pill starts fading
 - The pointer moves the cursor with `wlr-virtual-pointer`, captures the screen with `wlr-screencopy` (started before the overlay is even mapped) and runs detection on the captured buffer in place
 - Keys for the pointer come from an exclusive evdev grab taken once the hotkey's modifiers are released, so the compositor never sees them stuck
 
