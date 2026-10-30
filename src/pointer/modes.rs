@@ -91,6 +91,8 @@ struct FloatingState {
     areas: Vec<Rect>,
     symbols: LabelSymbols,
     selection: LabelSelection,
+    /// Label font size per area, worked out on the first frame.
+    sizes: std::cell::RefCell<Option<Vec<f64>>>,
 }
 
 struct HistState {
@@ -236,7 +238,7 @@ impl Engine {
                 let Some((symbols, selection)) = self.labels_state(&cfg, areas.len()) else {
                     return ModeState::Click;
                 };
-                ModeState::Floating(FloatingState { areas, symbols, selection })
+                ModeState::Floating(FloatingState { areas, symbols, selection, sizes: Default::default() })
             }
             ModeKind::Bisect | ModeKind::Split => {
                 self.move_to_center(area);
@@ -590,7 +592,69 @@ impl Engine {
         }
     }
 
+    /// Label size for each floating area. Small targets get their label
+    /// grown toward `label_min_size` where the bigger label stays clear of
+    /// every other target and every other label; otherwise the size is the
+    /// usual share of the target's height.
+    fn floating_label_sizes(&self, s: &FloatingState, fonts: &mut Fonts) -> Vec<f64> {
+        let f = &self.cfg.floating;
+        let normal: Vec<f64> = s.areas.iter().map(|a| f.labels.label_font_size.compute(a.h as f64)).collect();
+        if !f.label_grow || s.areas.is_empty() {
+            return normal;
+        }
+        // Text extents scale with the font size: measure each label once.
+        const REF: f64 = 100.0;
+        let mut sel = LabelSelection::new(&s.symbols, s.areas.len());
+        sel.set_from_idx(0);
+        let unit: Vec<(f64, f64)> = (0..s.areas.len())
+            .map(|_| {
+                let te = fonts.extents(&f.labels.label_font_family, REF, &sel.to_string(&s.symbols));
+                sel.incr();
+                (te.x_advance / REF, te.height / REF)
+            })
+            .collect();
+        let plate = |i: usize, size: f64| -> (f64, f64, f64, f64) {
+            let a = s.areas[i];
+            let (w, h) = (unit[i].0 * size + size * 0.4, unit[i].1 * size + size * 0.4);
+            let (cx, cy) = (a.x as f64 + a.w as f64 / 2.0, a.y as f64 + a.h as f64 / 2.0);
+            (cx - w / 2.0, cy - h / 2.0, w, h)
+        };
+        let hits = |a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)| {
+            a.0 < b.0 + b.2 && b.0 < a.0 + a.2 && a.1 < b.1 + b.3 && b.1 < a.1 + a.3
+        };
+        let contains = |o: &Rect, i: &Rect| o.x <= i.x && o.y <= i.y && o.x + o.w >= i.x + i.w && o.y + o.h >= i.y + i.h;
+        let rect = |r: &Rect| (r.x as f64 - 1.0, r.y as f64 - 1.0, r.w as f64 + 2.0, r.h as f64 + 2.0);
+
+        let mut sizes = normal.clone();
+        let mut grown: Vec<(f64, f64, f64, f64)> = Vec::new();
+        for i in 0..s.areas.len() {
+            if normal[i] >= f.label_min_size {
+                continue;
+            }
+            const STEPS: i32 = 6;
+            for step in 0..STEPS {
+                let size = f.label_min_size - (f.label_min_size - normal[i]) * step as f64 / STEPS as f64;
+                let p = plate(i, size);
+                let crowded = s.areas.iter().enumerate().any(|(j, o)| {
+                    j != i && !contains(o, &s.areas[i]) && !contains(&s.areas[i], o) && hits(p, rect(o))
+                }) || grown.iter().any(|g| hits(p, *g));
+                if !crowded {
+                    sizes[i] = size;
+                    grown.push(p);
+                    break;
+                }
+            }
+        }
+        sizes
+    }
+
     fn render_floating(&self, s: &FloatingState, cv: &mut Canvas, fonts: &mut Fonts) {
+        if s.sizes.borrow().is_none() {
+            let sizes = self.floating_label_sizes(s, fonts);
+            *s.sizes.borrow_mut() = Some(sizes);
+        }
+        let sizes = s.sizes.borrow();
+        let sizes = sizes.as_ref().unwrap();
         let cfg = &self.cfg.floating.labels;
         cv.paint(cfg.unselectable_bg_color);
         let mut cur = LabelSelection::new(&s.symbols, s.areas.len());
@@ -602,12 +666,19 @@ impl Engine {
             cur.incr();
         }
         cur.set_from_idx(0);
-        for a in &s.areas {
+        for (i, a) in s.areas.iter().enumerate() {
             if cur.is_included(&s.selection) {
                 let (x, y, w, h) = (a.x as f64, a.y as f64, a.w as f64, a.h as f64);
                 cv.fill_rect(x, y, w, h, cfg.selectable_bg_color, Op::Over);
                 cv.stroke_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, 1.0, cfg.selectable_border_color, Op::Source);
-                let font_size = cfg.label_font_size.compute(h);
+                let font_size = sizes[i];
+                let te = fonts.extents(&cfg.label_font_family, font_size, &cur.to_string(&s.symbols));
+                if te.x_advance > w || te.height > h {
+                    // Grown past its target: a plate keeps it readable.
+                    let pad = font_size * 0.2;
+                    let (pw, ph) = (te.x_advance + 2.0 * pad, te.height + 2.0 * pad);
+                    cv.fill_rect(x + (w - pw) / 2.0, y + (h - ph) / 2.0, pw, ph, self.cfg.floating.label_plate_color, Op::Over);
+                }
                 Self::draw_label(cv, fonts, cfg, font_size, &cur, &s.selection, &s.symbols, (x, y, w, h), Op::Over);
             }
             cur.incr();

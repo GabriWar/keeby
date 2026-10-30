@@ -93,6 +93,12 @@ pub struct Labels {
 pub struct Floating {
     pub source: FloatingSource,
     pub labels: Labels,
+    /// Grow labels of small targets up to `label_min_size` where that
+    /// doesn't run into other targets or labels.
+    pub label_grow: bool,
+    pub label_min_size: f64,
+    /// Backdrop behind a grown label that spills out of its target.
+    pub label_plate_color: u32,
 }
 
 #[derive(Clone)]
@@ -167,7 +173,13 @@ impl PointerConfig {
                 key_source: KeySource::Evdev,
             },
             tile: labels(8.0),
-            floating: Floating { source: FloatingSource::Stdin, labels: labels(12.0) },
+            floating: Floating {
+                source: FloatingSource::Stdin,
+                labels: labels(12.0),
+                label_grow: true,
+                label_min_size: 14.0,
+                label_plate_color: with_alpha(theme.bg, 0xdd),
+            },
             bisect: Bisect {
                 label_color: theme.text,
                 label_font_size: 20.0,
@@ -233,6 +245,27 @@ impl PointerConfig {
                 _ => return Err(unknown(section, field)),
             },
             "mode_tile" | "mode_floating" => {
+                if section == "mode_floating" {
+                    match field {
+                        "label_grow" => {
+                            self.floating.label_grow = match value.trim() {
+                                "true" | "yes" | "on" | "1" => true,
+                                "false" | "no" | "off" | "0" => false,
+                                _ => return Err(bad()),
+                            };
+                            return Ok(());
+                        }
+                        "label_min_size" => {
+                            self.floating.label_min_size = num()?;
+                            return Ok(());
+                        }
+                        "label_plate_color" => {
+                            self.floating.label_plate_color = color()?;
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+                }
                 if section == "mode_floating" && field == "source" {
                     self.floating.source = match value {
                         "stdin" => FloatingSource::Stdin,
@@ -433,6 +466,9 @@ pub const HELP: &str = "\
 # label_font_size           `<min> <pct>% <max>` of the area's height   (tile 8 50% 100, floating 12 50% 100)
 # label_symbols             characters used in labels   (abcdefghijklmnopqrstuvwxyz)
 # mode_floating.source      stdin: read `wxh+x+y` areas from stdin, detect: find targets on screen   (stdin)
+# mode_floating.label_grow  grow labels of small targets to label_min_size where there's room   (true)
+# mode_floating.label_min_size     smallest label size worth growing to, in px   (14)
+# mode_floating.label_plate_color  backdrop behind a grown label that spills out of its target
 
 ## mode_bisect
 # label_color, pointer_color, unselectable_bg_color, even_area_bg_color, even_area_border_color,
