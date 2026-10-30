@@ -234,6 +234,16 @@ fn handle_client(app: &mut PointerApp, mut stream: UnixStream) {
         .map(|a| String::from_utf8_lossy(a).into_owned())
         .collect();
     let stdin = msg.get(end + 1..).unwrap_or_default().to_vec();
+    if args.first().map(String::as_str) == Some("--overlay") {
+        let show = match args.get(1).map(String::as_str) {
+            Some("on") => Some(true),
+            Some("off") => Some(false),
+            _ => None,
+        };
+        let ok = app.send_overlay(show);
+        let _ = stream.write_all(&encode_reply(&Outcome { code: if ok { 0 } else { 1 }, ..Default::default() }));
+        return;
+    }
     let reply = move |o: Outcome| {
         let mut stream = stream;
         let _ = stream.write_all(&encode_reply(&o));
@@ -289,6 +299,26 @@ fn run_loop(
             return Ok(());
         }
     }
+}
+
+/// `keeby overlay [toggle|on|off]`: asks the running keeby to hide or show
+/// its overlay. Exits 1 when keeby isn't running.
+pub fn overlay_cli(cmd: Option<&str>) -> i32 {
+    let cmd = cmd.unwrap_or("toggle");
+    if !matches!(cmd, "toggle" | "on" | "off") {
+        eprintln!("usage: keeby overlay [toggle|on|off]");
+        return 1;
+    }
+    let Ok(mut s) = UnixStream::connect(socket_path()) else {
+        eprintln!("keeby isn't running");
+        return 1;
+    };
+    let msg = format!("--overlay\0{cmd}\0\0");
+    let mut reply = Vec::new();
+    if s.write_all(msg.as_bytes()).is_err() || s.shutdown(std::net::Shutdown::Write).is_err() || s.read_to_end(&mut reply).is_err() {
+        return 1;
+    }
+    decode_reply(&reply).map_or(1, |o| o.code)
 }
 
 /// Starts the pointer service inside the keeby daemon, on its own thread.

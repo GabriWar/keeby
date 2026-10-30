@@ -104,6 +104,9 @@ struct App {
 
     privacy_key: Option<Key>,
     privacy_mode: bool,
+    /// `keeby overlay off` hides the pills and the mouse widget; the pointer
+    /// service keeps running.
+    overlay_hidden: bool,
 
     exit: bool,
 }
@@ -348,6 +351,8 @@ fn print_help() {
     println!("    keeby            run the overlay and the pointer service (default)");
     println!("    keeby point ...  move, click and drag the pointer from the keyboard");
     println!("                     (`keeby point --help` for its options)");
+    println!("    keeby overlay [toggle|on|off]");
+    println!("                     hide or show the overlay of the running keeby");
     println!("    keeby --list     list keyboards, mice, and monitors, then exit");
     println!("    keeby --help     show this message\n");
     println!("CONFIG:  ~/.config/keeby/config.conf");
@@ -419,6 +424,9 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if matches!(args.first().map(String::as_str), Some("point" | "kbptr")) {
         std::process::exit(pointer::run_cli(&args[1..]));
+    }
+    if args.first().map(String::as_str) == Some("overlay") {
+        std::process::exit(pointer::overlay_cli(args.get(1).map(String::as_str)));
     }
     if args.iter().any(|a| a == "-h" || a == "--help" || a == "help") {
         print_help();
@@ -570,6 +578,7 @@ fn main() {
         cfg_auto_hide_mouse_secs: cfg.auto_hide_mouse_secs,
         privacy_key: cfg.privacy_key.as_deref().and_then(parse_key_name),
         privacy_mode: false,
+        overlay_hidden: false,
         exit: false,
     };
     if let Some(name) = cfg.privacy_key.as_deref() {
@@ -602,6 +611,19 @@ fn main() {
     loop_handle
         .insert_source(loop_chan, |ev, _, app: &mut App| {
             if let ChanEvent::Msg(msg) = ev {
+                if let InputMsg::SetOverlay(show) = msg {
+                    app.overlay_hidden = !show.unwrap_or(app.overlay_hidden);
+                    if app.overlay_hidden {
+                        app.keys.stream.clear();
+                        app.mouse = MouseState::new();
+                        app.draw_keys();
+                        app.draw_mouse();
+                    }
+                    return;
+                }
+                if app.overlay_hidden {
+                    return;
+                }
                 // Privacy panic key: intercept BEFORE any state mutation.
                 if let (Some(pk), InputMsg::Press(k)) = (app.privacy_key, &msg) {
                     if *k == pk {
@@ -648,6 +670,7 @@ fn main() {
                         app.last_mouse_activity = Instant::now();
                         redraw_mouse = true;
                     }
+                    InputMsg::SetOverlay(_) => {}
                 }
                 if redraw_keys {
                     app.draw_keys();

@@ -176,6 +176,11 @@ impl PointerApp {
         self.watchdog.tick();
     }
 
+    /// Forwards `keeby overlay` to the overlay's loop.
+    pub fn send_overlay(&self, show: Option<bool>) -> bool {
+        self.pills.as_ref().is_some_and(|p| p.send(InputMsg::SetOverlay(show)).is_ok())
+    }
+
     pub fn busy(&self) -> bool {
         self.session.is_some()
     }

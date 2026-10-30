@@ -14,6 +14,9 @@ pub enum InputMsg {
     MouseMotion(i32, i32),
     MouseButton(MouseBtn, bool),
     MouseScroll(i32, i32),
+    /// Show (`Some(true)`), hide (`Some(false)`) or toggle (`None`) the
+    /// overlay, from `keeby overlay`.
+    SetOverlay(Option<bool>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
