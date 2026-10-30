@@ -108,10 +108,10 @@ impl MouseRenderer {
             show_arrow: cfg.mouse_show_arrow,
             show_buttons: cfg.mouse_show_buttons,
             show_scroll: cfg.mouse_show_scroll,
-            bg: cfg.bg_color,
-            accent: cfg.accent_color,
-            arrow: cfg.mouse_arrow_color,
-            text: cfg.text_color,
+            bg: Rgba::from(cfg.theme.bg),
+            accent: Rgba::from(cfg.theme.accent),
+            arrow: cfg.mouse_arrow(),
+            text: Rgba::from(cfg.theme.text),
         }
     }
 

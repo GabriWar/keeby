@@ -2,6 +2,7 @@ mod config;
 mod input;
 mod labels;
 mod mouse;
+mod pointer;
 mod render;
 
 use std::sync::mpsc;
@@ -342,9 +343,11 @@ fn anchor_margins(a: CfgAnchor, mx: i32, my: i32) -> (i32, i32, i32, i32) {
 }
 
 fn print_help() {
-    println!("keeby — Wayland keystroke + mouse activity overlay\n");
+    println!("keeby — Wayland keyboard and mouse overlay, and keyboard-driven pointer\n");
     println!("USAGE:");
-    println!("    keeby            run the overlay (default)");
+    println!("    keeby            run the overlay and the pointer service (default)");
+    println!("    keeby point ...  move, click and drag the pointer from the keyboard");
+    println!("                     (`keeby point --help` for its options)");
     println!("    keeby --list     list keyboards, mice, and monitors, then exit");
     println!("    keeby --help     show this message\n");
     println!("CONFIG:  ~/.config/keeby/config.conf");
@@ -414,6 +417,9 @@ fn list_monitors() -> Result<Vec<String>, String> {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if matches!(args.first().map(String::as_str), Some("point" | "kbptr")) {
+        std::process::exit(pointer::run_cli(&args[1..]));
+    }
     if args.iter().any(|a| a == "-h" || a == "--help" || a == "help") {
         print_help();
         return;
@@ -580,6 +586,7 @@ fn main() {
         .expect("insert wayland source");
 
     let (mpsc_tx, mpsc_rx) = mpsc::channel::<InputMsg>();
+    pointer::spawn_daemon(mpsc_tx.clone());
     let filter = DeviceFilter::from_lists(&cfg.keyboard_names, &cfg.mouse_names);
     input::spawn(mpsc_tx, filter);
 

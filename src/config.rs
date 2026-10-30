@@ -9,6 +9,50 @@ impl Rgba {
     }
 }
 
+impl From<u32> for Rgba {
+    /// From `0xRRGGBBAA`.
+    fn from(c: u32) -> Self {
+        Rgba(
+            (c >> 24 & 0xff) as f32 / 255.0,
+            (c >> 16 & 0xff) as f32 / 255.0,
+            (c >> 8 & 0xff) as f32 / 255.0,
+            (c & 0xff) as f32 / 255.0,
+        )
+    }
+}
+
+/// The look shared by everything keeby draws: key pills, the mouse widget and
+/// the pointer overlay. Colors are `0xRRGGBBAA`.
+#[derive(Clone)]
+pub struct Theme {
+    /// Font file path or fontconfig family name.
+    pub font: Option<String>,
+    /// Older pill background, panels.
+    pub bg: u32,
+    /// Newest pill background, selectable areas.
+    pub accent: u32,
+    pub text: u32,
+    pub text_dim: u32,
+    /// Typed label prefix, pointer crosshair, motion arrow, drag marker.
+    pub highlight: u32,
+    /// Dims the screen behind the pointer overlay.
+    pub shade: u32,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            font: None,
+            bg: 0x21222cd9,
+            accent: 0x5c52a0eb,
+            text: 0xffffffff,
+            text_dim: 0xd2d6e6ff,
+            highlight: 0xffc750f2,
+            shade: 0x22222266,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum Anchor {
     TopLeft,
@@ -29,15 +73,11 @@ pub enum Orientation {
 }
 
 pub struct Config {
-    pub font_path: Option<String>,
+    pub theme: Theme,
     pub font_size: f32,
     pub margin_bottom: i32,
     pub pill_life_secs: f32,
     pub pill_fade_secs: f32,
-    pub bg_color: Rgba,
-    pub accent_color: Rgba,
-    pub text_color: Rgba,
-    pub text_dim_color: Rgba,
 
     pub mouse_enabled: bool,
     pub mouse_size: u32,
@@ -48,7 +88,8 @@ pub struct Config {
     pub mouse_show_arrow: bool,
     pub mouse_show_buttons: bool,
     pub mouse_show_scroll: bool,
-    pub mouse_arrow_color: Rgba,
+    /// Defaults to the theme's highlight.
+    pub mouse_arrow_color: Option<u32>,
 
     pub monitor: Option<String>,
     pub auto_hide_keys: bool,
@@ -64,20 +105,20 @@ pub struct Config {
     pub keyboard_names: Vec<String>,
     /// Same for mouse devices.
     pub mouse_names: Vec<String>,
+
+    /// `section.key = value` pointer settings, applied in order on top of the
+    /// theme-derived defaults.
+    pub pointer_settings: Vec<(String, String)>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            font_path: None,
+            theme: Theme::default(),
             font_size: 26.0,
             margin_bottom: 80,
             pill_life_secs: 3.5,
             pill_fade_secs: 1.0,
-            bg_color: Rgba(0.13, 0.13, 0.17, 0.85),
-            accent_color: Rgba(0.36, 0.32, 0.62, 0.92),
-            text_color: Rgba(1.0, 1.0, 1.0, 1.0),
-            text_dim_color: Rgba(0.82, 0.84, 0.90, 1.0),
             mouse_enabled: true,
             mouse_size: 110,
             mouse_anchor: Anchor::BottomLeft,
@@ -87,7 +128,7 @@ impl Default for Config {
             mouse_show_arrow: true,
             mouse_show_buttons: true,
             mouse_show_scroll: true,
-            mouse_arrow_color: Rgba(1.0, 0.78, 0.32, 0.95),
+            mouse_arrow_color: None,
             monitor: None,
             auto_hide_keys: true,
             auto_hide_keys_secs: 4.0,
@@ -96,6 +137,7 @@ impl Default for Config {
             privacy_key: Some("Pause".to_string()),
             keyboard_names: Vec::new(),
             mouse_names: Vec::new(),
+            pointer_settings: Vec::new(),
         }
     }
 }
@@ -120,7 +162,7 @@ impl Config {
             let k = k.trim();
             let v = v.trim().trim_matches('"').trim_matches('\'');
             match k {
-                "font" => cfg.font_path = Some(v.to_string()),
+                "font" => cfg.theme.font = Some(v.to_string()),
                 "size" | "font_size" => {
                     if let Ok(n) = v.parse::<f32>() {
                         cfg.font_size = n;
@@ -142,23 +184,23 @@ impl Config {
                     }
                 }
                 "bg_color" | "color_bg" => {
-                    if let Some(c) = parse_color(v) {
-                        cfg.bg_color = c;
+                    if let Some(c) = parse_color_u32(v) {
+                        cfg.theme.bg = c;
                     }
                 }
                 "accent_color" | "color_accent" => {
-                    if let Some(c) = parse_color(v) {
-                        cfg.accent_color = c;
+                    if let Some(c) = parse_color_u32(v) {
+                        cfg.theme.accent = c;
                     }
                 }
                 "text_color" | "color_text" => {
-                    if let Some(c) = parse_color(v) {
-                        cfg.text_color = c;
+                    if let Some(c) = parse_color_u32(v) {
+                        cfg.theme.text = c;
                     }
                 }
                 "text_dim_color" | "color_text_dim" => {
-                    if let Some(c) = parse_color(v) {
-                        cfg.text_dim_color = c;
+                    if let Some(c) = parse_color_u32(v) {
+                        cfg.theme.text_dim = c;
                     }
                 }
                 "mouse_enabled" => cfg.mouse_enabled = parse_bool(v),
@@ -190,9 +232,15 @@ impl Config {
                 "mouse_show_arrow" => cfg.mouse_show_arrow = parse_bool(v),
                 "mouse_show_buttons" => cfg.mouse_show_buttons = parse_bool(v),
                 "mouse_show_scroll" => cfg.mouse_show_scroll = parse_bool(v),
-                "mouse_arrow_color" => {
-                    if let Some(c) = parse_color(v) {
-                        cfg.mouse_arrow_color = c;
+                "mouse_arrow_color" => cfg.mouse_arrow_color = parse_color_u32(v),
+                "highlight_color" => {
+                    if let Some(c) = parse_color_u32(v) {
+                        cfg.theme.highlight = c;
+                    }
+                }
+                "shade_color" => {
+                    if let Some(c) = parse_color_u32(v) {
+                        cfg.theme.shade = c;
                     }
                 }
                 "monitor" => {
@@ -232,36 +280,29 @@ impl Config {
                 "mice" | "mouse_names" => {
                     cfg.mouse_names = parse_name_list(v);
                 }
+                _ if k.contains('.') => cfg.pointer_settings.push((k.to_string(), v.to_string())),
                 _ => {}
             }
         }
         cfg
     }
 
+    pub fn mouse_arrow(&self) -> Rgba {
+        Rgba::from(self.mouse_arrow_color.unwrap_or(self.theme.highlight))
+    }
+
     pub fn resolve_font_bytes(&self) -> Vec<u8> {
-        // 1. User-specified path.
-        if let Some(p) = &self.font_path {
-            if let Ok(b) = std::fs::read(p) {
+        // 1. The theme font: a path or a fontconfig family.
+        if let Some(spec) = &self.theme.font {
+            if let Some(b) = load_font(spec) {
                 return b;
             }
-            eprintln!("keeby: font {p} not readable, falling back");
+            eprintln!("keeby: font {spec} not found, falling back");
         }
-        // 2. Fallback chain (cozette first per default vibe).
-        const PATHS: &[&str] = &[
-            "/usr/share/fonts/TTF/CozetteVector.ttf",
-            "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Bold.ttf",
-            "/usr/share/fonts/TTF/JetBrainsMono-Bold.ttf",
-            "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
-            "/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf",
-            "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
-            "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-        ];
-        for p in PATHS {
-            if let Ok(b) = std::fs::read(p) {
-                return b;
-            }
-        }
-        panic!("no font found — set `font = /path/to/font.ttf` in {}", config_path().display());
+        // 2. The default chain.
+        default_font().unwrap_or_else(|| {
+            panic!("no font found — set `font = /path/to/font.ttf` in {}", config_path().display())
+        })
     }
 }
 
@@ -286,22 +327,32 @@ fn write_default(path: &std::path::Path) -> std::io::Result<()> {
 # life = seconds a key pill stays before fading
 # fade = seconds the fade animation lasts
 #
-# colors accept #rrggbb or #rrggbbaa. paste any hellwal/pywal hex here.
-# bg_color      = older pill background
-# accent_color  = newest pill background
-# text_color    = newest pill text
-# text_dim_color= older pill text
+#
+# --- theme ---
+# one palette for everything keeby draws: key pills, the mouse widget and the
+# pointer overlay (`keeby point`). colors accept #rgb, #rgba, #rrggbb or
+# #rrggbbaa. paste any hellwal/pywal hex here.
+# font            = font file path or fontconfig family name (unset: the built-in
+#                   Atkinson Hyperlegible Mono, made for telling look-alike letters apart)
+# bg_color        = older pill background
+# accent_color    = newest pill background, selectable pointer areas
+# text_color      = newest pill text, pointer labels
+# text_dim_color  = older pill text
+# highlight_color = mouse arrow, typed label prefix, pointer crosshair
+# shade_color     = dims the screen behind the pointer overlay
 
-font = /usr/share/fonts/TTF/CozetteVector.ttf
+# font = /usr/share/fonts/TTF/CozetteVector.ttf
 size = 26
 margin_bottom = 80
 life = 3.5
 fade = 1.0
 
-bg_color       = #21222cd9
-accent_color   = #5c52a0eb
-text_color     = #ffffffff
-text_dim_color = #d2d6e6ff
+bg_color        = #21222cd9
+accent_color    = #5c52a0eb
+text_color      = #ffffffff
+text_dim_color  = #d2d6e6ff
+highlight_color = #ffc750f2
+shade_color     = #22222266
 
 # --- mouse indicator ---
 # mouse_enabled        = true | false
@@ -312,7 +363,7 @@ text_dim_color = #d2d6e6ff
 # mouse_show_arrow     = motion-direction arrow inside the cursor circle
 # mouse_show_buttons   = LMB / MMB / RMB lights
 # mouse_show_scroll    = scroll-wheel chevrons
-# mouse_arrow_color    = motion arrow color
+# mouse_arrow_color    = motion arrow color (defaults to highlight_color)
 
 mouse_enabled       = true
 mouse_size          = 110
@@ -323,7 +374,6 @@ mouse_orientation   = horizontal
 mouse_show_arrow    = true
 mouse_show_buttons  = true
 mouse_show_scroll   = true
-mouse_arrow_color   = #ffc750f2
 
 # --- monitor ---
 # monitor = auto | <output name like DP-1, HDMI-A-1>
@@ -353,6 +403,13 @@ privacy_key = Pause
 #   mice      = Logitech, Razer
 keyboards =
 mice      =
+
+# --- pointer (keeby point) ---
+# move, click and drag the pointer from the keyboard. options use the
+# `section.key = value` form; colors left unset follow the theme above.
+# run `keeby point --help-config` for every option.
+general.modes = floating,click
+mode_floating.source = detect
 ";
     std::fs::write(path, body)
 }
@@ -395,28 +452,46 @@ fn parse_orientation(s: &str) -> Option<Orientation> {
     }
 }
 
-fn parse_color(s: &str) -> Option<Rgba> {
-    let s = s.trim().trim_start_matches('#');
-    let (r, g, b, a) = match s.len() {
-        6 => {
-            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-            (r, g, b, 255u8)
-        }
-        8 => {
-            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-            let a = u8::from_str_radix(&s[6..8], 16).ok()?;
-            (r, g, b, a)
-        }
+/// Parses `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa` (the `#` is optional)
+/// into `0xRRGGBBAA`.
+pub fn parse_color_u32(s: &str) -> Option<u32> {
+    let s = s.trim();
+    let s = s.strip_prefix('#').unwrap_or(s);
+    let d: Vec<u32> = s.chars().map(|c| c.to_digit(16)).collect::<Option<_>>()?;
+    Some(match d.len() {
+        8 => d.iter().fold(0, |acc, x| acc << 4 | x),
+        6 => d.iter().fold(0, |acc, x| acc << 4 | x) << 8 | 0xff,
+        4 => d.iter().fold(0, |acc, x| acc << 8 | x << 4 | x),
+        3 => d.iter().fold(0, |acc, x| acc << 8 | x << 4 | x) << 8 | 0xff,
         _ => return None,
+    })
+}
+
+/// The built-in font: Atkinson Hyperlegible Mono (Braille Institute), made so
+/// look-alike characters such as l/1/I and O/0 stay distinct; monospaced so
+/// labels line up. SIL Open Font License, see assets/fonts/OFL.txt.
+pub const DEFAULT_FONT: &[u8] = include_bytes!("../assets/fonts/AtkinsonHyperlegibleMono-Regular.ttf");
+
+pub fn default_font() -> Option<Vec<u8>> {
+    Some(DEFAULT_FONT.to_vec())
+}
+
+/// Loads a font from a file path (`~` allowed), or else asks fontconfig for
+/// the family. An empty spec means the default chain.
+pub fn load_font(spec: &str) -> Option<Vec<u8>> {
+    if spec.is_empty() {
+        return default_font();
+    }
+    let path = match spec.strip_prefix("~/") {
+        Some(rest) => format!("{}/{rest}", std::env::var("HOME").unwrap_or_default()),
+        None => spec.to_string(),
     };
-    Some(Rgba(
-        r as f32 / 255.0,
-        g as f32 / 255.0,
-        b as f32 / 255.0,
-        a as f32 / 255.0,
-    ))
+    if let Ok(b) = std::fs::read(&path) {
+        return Some(b);
+    }
+    let out = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}", spec])
+        .output()
+        .ok()?;
+    std::fs::read(String::from_utf8_lossy(&out.stdout).trim()).ok()
 }

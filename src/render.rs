@@ -139,10 +139,10 @@ impl Renderer {
             font_size,
             pill_h: (font_size * 2.4).max(48.0),
             pill_pad_x: font_size * 0.85,
-            bg_color: cfg.bg_color,
-            accent_color: cfg.accent_color,
-            text_color: cfg.text_color,
-            text_dim_color: cfg.text_dim_color,
+            bg_color: Rgba::from(cfg.theme.bg),
+            accent_color: Rgba::from(cfg.theme.accent),
+            text_color: Rgba::from(cfg.theme.text),
+            text_dim_color: Rgba::from(cfg.theme.text_dim),
         }
     }
 

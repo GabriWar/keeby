@@ -3,7 +3,7 @@ name = "keeby"
 version = "0.1.0"
 edition = "2021"
 description = "Lightweight Wayland on-screen keystroke + mouse activity overlay"
-license = "MIT"
+license = "GPL-3.0-only"
 repository = "https://github.com/GabriWar/keeby"
 readme = "README.md"
 
@@ -16,6 +16,20 @@ tiny-skia = "0.11"
 fontdue = "0.9"
 evdev = "0.12"
 inotify = { version = "0.11", default-features = false }
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+xkbcommon = "0.8"
+libc = "0.2"
+
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"
+
+[features]
+default = ["detect"]
+# Target detection for `floating` mode (`source = detect`), using wl-kbptr's
+# OpenCV code as is. Needs OpenCV (5 or 4) and pixman.
+detect = []
 
 [profile.release]
 opt-level = 3
