@@ -1,4 +1,5 @@
 mod config;
+mod gui;
 mod input;
 mod labels;
 mod mouse;
@@ -340,6 +341,7 @@ fn print_help() {
     println!("    keeby point [OPTION...]        move, click and drag the pointer from the keyboard");
     println!("                                   (`keeby point --help` for its options)");
     println!("    keeby overlay [toggle|on|off]  hide or show the overlay of the running keeby");
+    println!("    keeby config [--no-open]       edit the settings in the browser");
     println!("    keeby --list                   input devices and monitors keeby can see");
     println!("    keeby --help                   this message\n");
     println!("CONFIG:  ~/.config/keeby/config.conf");
@@ -401,6 +403,7 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("point" | "kbptr") => std::process::exit(pointer::run_cli(&args[1..])),
         Some("overlay") => std::process::exit(pointer::overlay_cli(args.get(1).map(String::as_str))),
+        Some("config") => std::process::exit(gui::run(!args.iter().any(|a| a == "--no-open"))),
         Some("-h" | "--help" | "help") => return print_help(),
         Some("-l" | "--list" | "list") => return run_list(),
         _ => {}

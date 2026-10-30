@@ -66,6 +66,7 @@ Without it, `keeby point` still works but takes the keyboard focus the normal wa
 ```fish
 keeby                 # overlay + pointer service
 keeby point ...       # one pointer selection (talks to the daemon, or runs on its own)
+keeby config          # edit the settings in the browser
 keeby --list          # keyboards, mice and monitors keeby can see
 keeby point --help    # pointer options
 ```
@@ -93,6 +94,8 @@ Every pick prints `wxh+x+y +ox+oy click` (the area, the output's position and `l
 ## Configuration
 
 The first launch writes `~/.config/keeby/config.conf`. Every key is optional.
+
+`keeby config` opens a settings page in your browser with every option, color pickers with transparency, and Save & apply (which restarts keeby). It edits the same file and keeps your comments.
 
 ```ini
 # --- theme: one palette for the overlay and the pointer ---

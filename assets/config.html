@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>keeby settings</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --fg: #1b1f27; --muted: #5b6372; --card: #ffffff;
+    --line: #dde1e8; --accent: #e8335a; --key: #eef0f4; --area: #2f6fd8; --ok: #1f9d55;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171d; --fg: #e6e9ef; --muted: #98a1b2; --card: #1c2029;
+      --line: #2c3240; --accent: #ff5577; --key: #262b36; --area: #5d95ff; --ok: #3ccf7f; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 980px; margin: 0 auto; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .bar h1 { font-size: 18px; margin: 0 auto 0 0; }
+  .status { color: var(--muted); font-size: 13px; min-width: 12ch; }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: var(--accent); }
+  .btn { font: inherit; font-size: 14px; background: var(--key); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 14px; cursor: pointer; }
+  .btn.primary { background: var(--area); border-color: var(--area); color: #fff; }
+  .btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--area); outline-offset: 2px; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px 16px 64px; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+  nav a { font-size: 13px; color: var(--fg); text-decoration: none; background: var(--key); border: 1px solid var(--line); border-radius: 999px; padding: 2px 12px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 18px 12px; margin-bottom: 16px; }
+  section h2 { font-size: 16px; margin: 12px 0 2px; }
+  section > p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .name { font-weight: 600; font-size: 14px; }
+  .name small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .name code { font-size: 11px; color: var(--muted); font-weight: 400; }
+  .ctl { display: flex; gap: 8px; align-items: center; min-width: 0; }
+  .ctl input[type=text], .ctl input[type=number], .ctl select { font: inherit; font-size: 14px; width: 100%; min-width: 0; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  .ctl input[type=color] { width: 40px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; flex: none; }
+  .ctl input[type=range] { width: 90px; flex: none; accent-color: var(--area); }
+  .ctl .hex { font-family: ui-monospace, monospace; }
+  .swatch { width: 30px; height: 30px; border-radius: 6px; flex: none; border: 1px solid var(--line);
+    background-image: linear-gradient(45deg, #8884 25%, transparent 25%, transparent 75%, #8884 75%), linear-gradient(45deg, #8884 25%, transparent 25%, transparent 75%, #8884 75%);
+    background-size: 10px 10px; background-position: 0 0, 5px 5px; position: relative; overflow: hidden; }
+  .swatch i { position: absolute; inset: 0; }
+  .reset { font-size: 12px; color: var(--muted); background: none; border: 0; cursor: pointer; padding: 2px 4px; }
+  .reset:hover { color: var(--accent); }
+  .row.unset .ctl { opacity: .55; }
+  .row.unset .reset { visibility: hidden; }
+  details { margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  textarea { width: 100%; min-height: 280px; font: 13px/1.4 ui-monospace, monospace; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-top: 8px; }
+  @media (max-width: 640px) { .row { grid-template-columns: minmax(0, 1fr) auto; } .row .ctl { grid-column: 1 / -1; grid-row: 2; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>keeby settings</h1>
+    <span class="status" id="status" role="status"></span>
+    <button class="btn" id="save" type="button">Save</button>
+    <button class="btn primary" id="apply" type="button" title="Save and restart keeby so the overlay picks up the changes">Save &amp; apply</button>
+    <button class="btn" id="done" type="button">Done</button>
+  </div>
+</header>
+<main>
+  <nav id="nav"></nav>
+  <div id="sections"></div>
+  <section>
+    <h2>Config file</h2>
+    <p>Everything above edits <code>~/.config/keeby/config.conf</code>, keeping your comments. The pointer reads it on every run; the overlay after Save &amp; apply.</p>
+    <details><summary>Show the file</summary><textarea id="raw" spellcheck="false" aria-label="config file"></textarea></details>
+  </section>
+</main>
+
+<script>
+const T = '__TOKEN__';
+const api = (p) => `${p}?t=${T}`;
+const $ = (id) => document.getElementById(id);
+
+// Every option, grouped. `def` is shown when the key isn't set. Colors with
+// def 'theme' follow the theme when unset.
+const anchors = ['top-left','top','top-right','left','center','right','bottom-left','bottom','bottom-right'];
+const labelColors = (sec) => [
+  [`${sec}.label_color`, 'Label', 'color', 'theme', 'text color'],
+  [`${sec}.label_select_color`, 'Typed part of a label', 'color', 'theme', 'highlight color'],
+  [`${sec}.unselectable_bg_color`, 'Screen dim', 'color', 'theme', 'shade color'],
+  [`${sec}.selectable_bg_color`, 'Target fill', 'color', 'theme', 'accent, mostly transparent'],
+  [`${sec}.selectable_border_color`, 'Target border', 'color', 'theme', 'accent'],
+  [`${sec}.label_font_family`, 'Label font', 'text', '', 'family name or file path; empty = theme font'],
+  [`${sec}.label_symbols`, 'Label characters', 'text', 'abcdefghijklmnopqrstuvwxyz'],
+];
+const SCHEMA = [
+  ['theme', 'Theme', 'One palette for the key overlay, the mouse widget and the pointer. Every color below can still be set on its own.', [
+    ['font', 'Font', 'text', '', 'family name or .ttf/.otf path; empty = built-in Atkinson Hyperlegible Mono'],
+    ['bg_color', 'Background', 'color', '#21222cd9', 'older pills, panels'],
+    ['accent_color', 'Accent', 'color', '#5c52a0eb', 'newest pill, pointer targets'],
+    ['text_color', 'Text', 'color', '#ffffffff'],
+    ['text_dim_color', 'Dim text', 'color', '#d2d6e6ff', 'older pills'],
+    ['highlight_color', 'Highlight', 'color', '#ffc750f2', 'mouse arrow, typed label, crosshair, drag marker'],
+    ['shade_color', 'Shade', 'color', '#22222266', 'dims the screen behind the pointer'],
+  ]],
+  ['keys', 'Key overlay', 'The pills showing what you press.', [
+    ['size', 'Text size', 'number', '26', 'px'],
+    ['margin_bottom', 'Distance from the bottom', 'number', '80', 'px'],
+    ['life', 'Pill lifetime', 'number', '3.5', 'seconds'],
+    ['fade', 'Fade time', 'number', '1.0', 'seconds'],
+    ['privacy_key', 'Privacy key', 'text', 'Pause', 'tap to stop capturing, tap again to resume; none to disable'],
+  ]],
+  ['mouse', 'Mouse widget', 'The cursor disc, buttons and scroll indicator.', [
+    ['mouse_enabled', 'Show it', 'bool', 'true'],
+    ['mouse_size', 'Size', 'number', '110', 'px'],
+    ['mouse_anchor', 'Position', 'select', 'bottom-left', '', anchors],
+    ['mouse_margin_x', 'Horizontal margin', 'number', '30', 'px'],
+    ['mouse_margin_y', 'Vertical margin', 'number', '80', 'px'],
+    ['mouse_orientation', 'Layout', 'select', 'horizontal', '', ['horizontal', 'vertical']],
+    ['mouse_show_arrow', 'Motion arrow', 'bool', 'true'],
+    ['mouse_show_buttons', 'Button lights', 'bool', 'true'],
+    ['mouse_show_scroll', 'Scroll chevrons', 'bool', 'true'],
+    ['mouse_arrow_color', 'Arrow color', 'color', 'theme', 'highlight color'],
+    ['auto_hide_mouse', 'Hide when idle', 'bool', 'false'],
+    ['auto_hide_mouse_secs', 'Idle time', 'number', '6.0', 'seconds'],
+  ]],
+  ['devices', 'Devices and monitor', 'Run keeby --list to see names. Empty lists mean every device.', [
+    ['monitor', 'Monitor', 'text', 'auto', 'auto or a name like eDP-1'],
+    ['keyboards', 'Keyboards', 'text', '', 'comma-separated name parts'],
+    ['mice', 'Mice, touchpads, tablets', 'text', '', 'comma-separated name parts'],
+  ]],
+  ['pointer', 'Pointer', 'keeby point: move, click and drag from the keyboard. These are the defaults; -o on a keybind overrides them per run.', [
+    ['general.modes', 'Modes', 'text', 'tile,bisect', 'chain of floating, tile, bisect, split, click'],
+    ['general.home_row_keys', 'Home row keys', 'text', '', '11 characters: 8 for bisect, then left/right/middle click; empty = your layout'],
+    ['general.key_source', 'Keyboard', 'select', 'evdev', 'evdev keeps menus open (needs the input group)', ['evdev', 'wayland']],
+    ['general.cancellation_status_code', 'Exit status on cancel', 'number', '0'],
+    ['mode_click.button', 'Click button', 'select', 'left', '', ['left', 'middle', 'right', 'none']],
+  ]],
+  ['floating', 'Floating mode', 'Labels on detected targets (or areas from stdin).', [
+    ['mode_floating.source', 'Targets from', 'select', 'stdin', 'detect finds them on screen', ['detect', 'stdin']],
+    ['mode_floating.label_grow', 'Grow small labels', 'bool', 'true', 'bigger labels on small targets where there\'s room'],
+    ['mode_floating.label_min_size', 'Grow up to', 'number', '14', 'px'],
+    ['mode_floating.label_plate_color', 'Grown label backdrop', 'color', 'theme', 'background, mostly opaque'],
+    ['mode_floating.label_font_size', 'Label size', 'text', '12 50% 100', 'min, share of the target height, max'],
+    ...labelColors('mode_floating'),
+  ]],
+  ['tile', 'Tile mode', 'A labelled grid over the screen.', [
+    ['mode_tile.label_font_size', 'Label size', 'text', '8 50% 100', 'min, share of the cell height, max'],
+    ...labelColors('mode_tile'),
+  ]],
+  ['bisect', 'Bisect mode', 'Halve the area with the home row keys.', [
+    ['mode_bisect.label_color', 'Label', 'color', 'theme', 'text color'],
+    ['mode_bisect.label_font_size', 'Label size', 'number', '20', 'px'],
+    ['mode_bisect.label_font_family', 'Label font', 'text', '', 'empty = theme font'],
+    ['mode_bisect.label_padding', 'Label padding', 'number', '12', 'px'],
+    ['mode_bisect.pointer_size', 'Crosshair size', 'number', '20', 'px'],
+    ['mode_bisect.pointer_color', 'Crosshair', 'color', 'theme', 'highlight color'],
+    ['mode_bisect.unselectable_bg_color', 'Screen dim', 'color', 'theme', 'shade color'],
+    ['mode_bisect.even_area_bg_color', 'Even areas', 'color', 'theme'],
+    ['mode_bisect.even_area_border_color', 'Even area borders', 'color', 'theme'],
+    ['mode_bisect.odd_area_bg_color', 'Odd areas', 'color', 'theme'],
+    ['mode_bisect.odd_area_border_color', 'Odd area borders', 'color', 'theme'],
+    ['mode_bisect.history_border_color', 'Previous areas', 'color', 'theme'],
+  ]],
+  ['split', 'Split mode', 'Halve the area with the arrow keys.', [
+    ['mode_split.pointer_size', 'Crosshair size', 'number', '20', 'px'],
+    ['mode_split.pointer_color', 'Crosshair', 'color', 'theme', 'highlight color'],
+    ['mode_split.bg_color', 'Screen dim', 'color', 'theme', 'shade color'],
+    ['mode_split.area_bg_color', 'Current area', 'color', 'theme'],
+    ['mode_split.vertical_color', 'Up/down markers', 'color', 'theme'],
+    ['mode_split.horizontal_color', 'Left/right markers', 'color', 'theme'],
+    ['mode_split.history_border_color', 'Previous areas', 'color', 'theme'],
+  ]],
+  ['drag', 'Drag', 'The marker left at the start of a drag.', [
+    ['mode_drag.start_marker_shape', 'Marker shape', 'select', 'caret', '', ['caret', 'circle', 'rectangle']],
+    ['mode_drag.start_marker_size', 'Marker size', 'number', '8', 'px'],
+    ['mode_drag.start_marker_color', 'Marker color', 'color', 'theme', 'highlight color'],
+  ]],
+];
+
+// ------------------------------------------------------------ the file
+
+let lines = [];
+const keyRe = (k) => new RegExp('^\\s*' + k.replace(/\./g, '\\.') + '\\s*=');
+
+function get(k) {
+  const l = lines.find((l) => keyRe(k).test(l));
+  return l === undefined ? null : l.slice(l.indexOf('=') + 1).trim();
+}
+function set(k, v) {
+  const i = lines.findIndex((l) => keyRe(k).test(l));
+  const line = `${k} = ${v}`;
+  if (i >= 0) lines[i] = line;
+  else {
+    let end = lines.length;
+    while (end > 0 && lines[end - 1].trim() === '') end--;
+    lines.splice(end, 0, line);
+  }
+  dirty();
+}
+function unset(k) {
+  lines = lines.filter((l) => !keyRe(k).test(l));
+  dirty();
+}
+
+// ---------------------------------------------------------------- colors
+
+function parseColor(s) {
+  if (!s) return null;
+  let h = s.trim().replace(/^#/, '');
+  if (!/^[0-9a-f]+$/i.test(h)) return null;
+  if (h.length === 3 || h.length === 4) h = h.split('').map((c) => c + c).join('');
+  if (h.length === 6) h += 'ff';
+  if (h.length !== 8) return null;
+  return { rgb: '#' + h.slice(0, 6), a: parseInt(h.slice(6), 16) };
+}
+const toHex = (rgb, a) => rgb + a.toString(16).padStart(2, '0');
+
+// ---------------------------------------------------------------- render
+
+function field([key, label, type, def, help, options]) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const id = 'f-' + key.replace(/\./g, '-');
+  const name = document.createElement('label');
+  name.className = 'name';
+  name.htmlFor = id;
+  name.innerHTML = `${label} <code>${key}</code>${help ? `<small>${help}</small>` : ''}`;
+  const ctl = document.createElement('div');
+  ctl.className = 'ctl';
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'reset';
+  reset.textContent = 'reset';
+  reset.title = 'Remove from the file (use the default)';
+  row.append(name, ctl, reset);
+
+  const cur = get(key);
+  row.classList.toggle('unset', cur === null);
+  const mark = () => row.classList.remove('unset');
+
+  if (type === 'color') {
+    const c = parseColor(cur ?? (def !== 'theme' ? def : '')) || { rgb: '#888888', a: 255 };
+    const sw = document.createElement('span');
+    sw.className = 'swatch';
+    const fill = document.createElement('i');
+    sw.append(fill);
+    const pick = Object.assign(document.createElement('input'), { type: 'color', value: c.rgb, id, title: 'color' });
+    const alpha = Object.assign(document.createElement('input'), { type: 'range', min: 0, max: 255, value: c.a, title: 'transparency' });
+    alpha.setAttribute('aria-label', label + ' transparency');
+    const hex = Object.assign(document.createElement('input'), { type: 'text', className: 'hex', value: cur ?? '', placeholder: def === 'theme' ? 'follows theme' : def });
+    hex.setAttribute('aria-label', label + ' hex');
+    const paint = () => (fill.style.background = toHex(pick.value, +alpha.value));
+    const fromPickers = () => { const v = toHex(pick.value, +alpha.value); hex.value = v; paint(); set(key, v); mark(); };
+    pick.addEventListener('input', fromPickers);
+    alpha.addEventListener('input', fromPickers);
+    hex.addEventListener('change', () => {
+      const p = parseColor(hex.value);
+      if (!hex.value.trim()) { unset(key); row.classList.add('unset'); return; }
+      if (!p) { hex.style.borderColor = 'var(--accent)'; return; }
+      hex.style.borderColor = '';
+      pick.value = p.rgb; alpha.value = p.a; paint(); set(key, hex.value.trim()); mark();
+    });
+    paint();
+    ctl.append(sw, pick, alpha, hex);
+    reset.addEventListener('click', () => { unset(key); hex.value = ''; row.classList.add('unset'); });
+    return row;
+  }
+
+  let input;
+  if (type === 'bool') {
+    input = document.createElement('select');
+    ['true', 'false'].forEach((v) => input.append(new Option(v === 'true' ? 'on' : 'off', v)));
+    input.value = ['true', 'yes', 'on', '1'].includes((cur ?? def).toLowerCase()) ? 'true' : 'false';
+  } else if (type === 'select') {
+    input = document.createElement('select');
+    options.forEach((v) => input.append(new Option(v, v)));
+    input.value = cur ?? def;
+  } else {
+    input = Object.assign(document.createElement('input'), { type: type === 'number' ? 'number' : 'text', value: cur ?? '', placeholder: def });
+    if (type === 'number') input.step = 'any';
+  }
+  input.id = id;
+  input.addEventListener('change', () => {
+    if (input.value === '' && type !== 'bool' && type !== 'select') { unset(key); row.classList.add('unset'); }
+    else { set(key, input.value); mark(); }
+  });
+  ctl.append(input);
+  reset.addEventListener('click', () => {
+    unset(key);
+    if (type === 'bool') input.value = def; else if (type === 'select') input.value = def; else input.value = '';
+    row.classList.add('unset');
+  });
+  return row;
+}
+
+function render() {
+  const root = $('sections');
+  root.innerHTML = '';
+  $('nav').innerHTML = '';
+  for (const [id, title, desc, fields] of SCHEMA) {
+    const sec = document.createElement('section');
+    sec.id = id;
+    sec.innerHTML = `<h2>${title}</h2><p>${desc}</p>`;
+    fields.forEach((f) => sec.append(field(f)));
+    root.append(sec);
+    const a = Object.assign(document.createElement('a'), { href: '#' + id, textContent: title });
+    $('nav').append(a);
+  }
+  $('raw').value = lines.join('\n');
+}
+
+// ---------------------------------------------------------------- saving
+
+let changed = false;
+function dirty() {
+  changed = true;
+  $('raw').value = lines.join('\n');
+  say('unsaved changes');
+}
+function say(text, cls = '') {
+  $('status').textContent = text;
+  $('status').className = 'status ' + cls;
+}
+
+async function save() {
+  const r = await fetch(api('/api/config'), { method: 'POST', body: lines.join('\n') });
+  if (!r.ok) throw new Error(await r.text());
+  changed = false;
+}
+
+$('raw').addEventListener('change', () => { lines = $('raw').value.split('\n'); render(); dirty(); });
+$('save').addEventListener('click', async () => {
+  try { await save(); say('Saved. The pointer uses it from the next run.', 'ok'); }
+  catch (e) { say('Couldn\'t save: ' + e.message, 'bad'); }
+});
+$('apply').addEventListener('click', async () => {
+  try {
+    await save();
+    const r = await fetch(api('/api/restart'), { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    say('Saved and keeby restarted.', 'ok');
+  } catch (e) { say('Couldn\'t apply: ' + e.message, 'bad'); }
+});
+$('done').addEventListener('click', async () => {
+  if (changed && !confirmLeave()) return;
+  try { await fetch(api('/api/quit'), { method: 'POST' }); } catch (e) {}
+  say('Closed. You can close this tab.', 'ok');
+  document.querySelectorAll('button').forEach((b) => (b.disabled = true));
+});
+let warned = false;
+function confirmLeave() {
+  if (warned) return true;
+  warned = true;
+  say('Unsaved changes: press Done again to discard them.', 'bad');
+  return false;
+}
+window.addEventListener('beforeunload', (e) => { if (changed) e.preventDefault(); });
+
+fetch(api('/api/config'))
+  .then((r) => r.text())
+  .then((t) => { lines = t.split('\n'); render(); say('Loaded'); })
+  .catch((e) => say('Couldn\'t load the config: ' + e.message, 'bad'));
+</script>
+</body>
+</html>
