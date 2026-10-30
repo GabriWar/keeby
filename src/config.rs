@@ -144,13 +144,17 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Self {
-        let mut cfg = Config::default();
         let path = config_path();
         let Ok(contents) = std::fs::read_to_string(&path) else {
             // Write a starter config so it's discoverable.
             let _ = write_default(&path);
-            return cfg;
+            return Config::default();
         };
+        Self::parse(&contents)
+    }
+
+    pub fn parse(contents: &str) -> Self {
+        let mut cfg = Config::default();
         for line in contents.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {

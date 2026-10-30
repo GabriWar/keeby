@@ -17,7 +17,7 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); }
-  .bar { max-width: 980px; margin: 0 auto; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .bar { max-width: 1560px; margin: 0 auto; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .bar h1 { font-size: 18px; margin: 0 auto 0 0; }
   .status { color: var(--muted); font-size: 13px; min-width: 12ch; }
   .status.ok { color: var(--ok); }
@@ -25,7 +25,18 @@
   .btn { font: inherit; font-size: 14px; background: var(--key); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 14px; cursor: pointer; }
   .btn.primary { background: var(--area); border-color: var(--area); color: #fff; }
   .btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--area); outline-offset: 2px; }
-  main { max-width: 980px; margin: 0 auto; padding: 16px 16px 64px; }
+  .layout { max-width: 1560px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  main { min-width: 0; padding-bottom: 48px; }
+  aside { position: sticky; top: 72px; min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 12px; }
+  .pvhead { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 14px; }
+  .pvhead select { font: inherit; font-size: 13px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+  .pvhead .msg { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .pvhead .msg.bad { color: var(--accent); }
+  .screen { position: relative; border-radius: 6px; overflow: hidden; background: #000; line-height: 0; }
+  .screen img { width: 100%; height: auto; display: block; }
+  .screen #ovl { position: absolute; inset: 0; }
+  .screen #shot.dim { opacity: .35; }
+  @media (max-width: 1100px) { .layout { grid-template-columns: minmax(0, 1fr); } aside { position: static; order: -1; } }
   nav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
   nav a { font-size: 13px; color: var(--fg); text-decoration: none; background: var(--key); border: 1px solid var(--line); border-radius: 999px; padding: 2px 12px; }
   section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 18px 12px; margin-bottom: 16px; }
@@ -65,6 +76,7 @@
     <button class="btn" id="done" type="button">Done</button>
   </div>
 </header>
+<div class="layout">
 <main>
   <nav id="nav"></nav>
   <div id="sections"></div>
@@ -74,6 +86,24 @@
     <details><summary>Show the file</summary><textarea id="raw" spellcheck="false" aria-label="config file"></textarea></details>
   </section>
 </main>
+<aside aria-label="preview">
+  <div class="pvhead">
+    <strong>Preview</strong>
+    <select id="view" aria-label="what to preview">
+      <option value="overlay">Key overlay and mouse</option>
+      <option value="floating">Floating mode</option>
+      <option value="tile">Tile mode</option>
+      <option value="bisect">Bisect mode</option>
+      <option value="split">Split mode</option>
+      <option value="drag">Drag</option>
+    </select>
+    <button class="btn" id="bgshot" type="button" title="Takes a screenshot in 3 seconds: switch to the window you want behind the preview">Use my screen</button>
+    <button class="btn" id="bgplain" type="button" hidden>Plain background</button>
+    <span class="msg" id="pvmsg"></span>
+  </div>
+  <div class="screen"><img id="shot" alt="your screen"><img id="ovl" alt=""></div>
+</aside>
+</div>
 
 <script>
 const T = '__TOKEN__';
@@ -282,6 +312,7 @@ function field([key, label, type, def, help, options]) {
     if (type === 'number') input.step = 'any';
   }
   input.id = id;
+  if (type === 'number' || type === 'text') input.addEventListener('input', () => { if (input.value !== '') { set(key, input.value); mark(); } });
   input.addEventListener('change', () => {
     if (input.value === '' && type !== 'bool' && type !== 'select') { unset(key); row.classList.add('unset'); }
     else { set(key, input.value); mark(); }
@@ -316,6 +347,7 @@ function render() {
 let changed = false;
 function dirty() {
   changed = true;
+  refresh();
   $('raw').value = lines.join('\n');
   say('unsaved changes');
 }
@@ -358,9 +390,75 @@ function confirmLeave() {
 }
 window.addEventListener('beforeunload', (e) => { if (changed) e.preventDefault(); });
 
+// --------------------------------------------------------------- preview
+
+// Which preview each section shows; the pointer section shows its first mode.
+const VIEW_OF = { theme: 'overlay', keys: 'overlay', mouse: 'overlay', devices: 'overlay',
+  floating: 'floating', tile: 'tile', bisect: 'bisect', split: 'split', drag: 'drag',
+  pointer: () => { const m = (get('general.modes') || 'tile').split(',')[0].trim(); return ['floating', 'tile', 'bisect', 'split'].includes(m) ? m : 'tile'; } };
+let view = 'overlay', pending = null, timer = 0, ovlUrl = '';
+
+function showView(v) {
+  if (v === view) return;
+  view = v;
+  $('view').value = v;
+  refresh();
+}
+function sectionView(sec) {
+  const v = sec && VIEW_OF[sec.id];
+  return typeof v === 'function' ? v() : v;
+}
+function refresh() {
+  clearTimeout(timer);
+  timer = setTimeout(async () => {
+    if (pending) pending.abort();
+    pending = new AbortController();
+    try {
+      const r = await fetch(api('/api/preview') + '&view=' + view, { method: 'POST', body: lines.join('\n'), signal: pending.signal });
+      if (!r.ok) throw new Error(await r.text());
+      const url = URL.createObjectURL(await r.blob());
+      $('ovl').src = url;
+      if (ovlUrl) URL.revokeObjectURL(ovlUrl);
+      ovlUrl = url;
+      $('pvmsg').textContent = ''; $('pvmsg').className = 'msg';
+    } catch (e) {
+      if (e.name !== 'AbortError') { $('pvmsg').textContent = e.message; $('pvmsg').className = 'msg bad'; }
+    }
+  }, 60);
+}
+$('view').addEventListener('change', () => { view = $('view').value; refresh(); });
+$('shot').src = api('/api/screen.png');
+async function background(path, msg) {
+  $('pvmsg').textContent = msg; $('pvmsg').className = 'msg';
+  const r = await fetch(api(path), { method: 'POST' });
+  if (!r.ok) { $('pvmsg').textContent = await r.text(); $('pvmsg').className = 'msg bad'; return false; }
+  $('shot').src = api('/api/screen.png') + '&n=' + Date.now();
+  $('pvmsg').textContent = '';
+  refresh();
+  return true;
+}
+$('bgshot').addEventListener('click', async () => {
+  if (await background('/api/screenshot', 'switch windows: screenshot in 3 s')) { $('bgshot').hidden = true; $('bgplain').hidden = false; }
+});
+$('bgplain').addEventListener('click', async () => {
+  if (await background('/api/background', '')) { $('bgplain').hidden = true; $('bgshot').hidden = false; }
+});
+// Follow the section being edited, or the one in the middle of the screen.
+document.addEventListener('focusin', (e) => { const v = sectionView(e.target.closest('section')); if (v) showView(v); });
+let scrollTick = 0;
+window.addEventListener('scroll', () => {
+  cancelAnimationFrame(scrollTick);
+  scrollTick = requestAnimationFrame(() => {
+    const y = innerHeight * 0.35;
+    const sec = [...document.querySelectorAll('#sections > section')].find((s) => { const r = s.getBoundingClientRect(); return r.top <= y && r.bottom > y; });
+    const v = sectionView(sec);
+    if (v) showView(v);
+  });
+}, { passive: true });
+
 fetch(api('/api/config'))
   .then((r) => r.text())
-  .then((t) => { lines = t.split('\n'); render(); say('Loaded'); })
+  .then((t) => { lines = t.split('\n'); render(); say('Loaded'); refresh(); })
   .catch((e) => say('Couldn\'t load the config: ' + e.message, 'bad'));
 </script>
 </body>

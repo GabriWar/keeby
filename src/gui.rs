@@ -71,6 +71,7 @@ pub fn run(open_browser: bool) -> i32 {
     if !path.exists() {
         crate::config::Config::load(); // writes the starter config
     }
+    let mut preview = crate::preview::Preview::new();
     println!("keeby config: {url}\n(close the page with Done, or Ctrl+C here)");
     if open_browser {
         let _ = std::process::Command::new("xdg-open")
@@ -125,6 +126,26 @@ pub fn run(open_browser: bool) -> i32 {
                     Ok(()) => respond(&mut s, "200 OK", "text/plain", b"saved"),
                     Err(e) => respond(&mut s, "500 Internal Server Error", "text/plain", e.to_string().as_bytes()),
                 }
+            }
+            ("GET", "/api/screen.png") => respond(&mut s, "200 OK", "image/png", &preview.screen_png),
+            ("POST", "/api/preview") => {
+                let view = query.split('&').find_map(|kv| kv.strip_prefix("view=")).unwrap_or("overlay");
+                match preview.render(&String::from_utf8_lossy(&body), view) {
+                    Ok(png) => respond(&mut s, "200 OK", "image/png", &png),
+                    Err(e) => respond(&mut s, "422 Unprocessable Entity", "text/plain", e.as_bytes()),
+                }
+            }
+            ("POST", "/api/screenshot") => {
+                // Gives time to switch to the window to show behind the preview.
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                match preview.screenshot(&crate::config::Config::load()) {
+                    Ok(()) => respond(&mut s, "200 OK", "text/plain", b"ok"),
+                    Err(e) => respond(&mut s, "500 Internal Server Error", "text/plain", e.as_bytes()),
+                }
+            }
+            ("POST", "/api/background") => {
+                preview = crate::preview::Preview::new();
+                respond(&mut s, "200 OK", "text/plain", b"ok")
             }
             ("POST", "/api/restart") => match restart_daemon() {
                 Ok(()) => respond(&mut s, "200 OK", "text/plain", b"restarted"),

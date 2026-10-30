@@ -4,6 +4,7 @@ mod input;
 mod labels;
 mod mouse;
 mod pointer;
+mod preview;
 mod render;
 
 use std::time::{Duration, Instant};

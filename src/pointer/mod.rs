@@ -11,6 +11,7 @@ mod draw;
 mod grab;
 mod label;
 mod modes;
+pub mod preview;
 mod session;
 
 use std::io::{Read, Write};
@@ -26,7 +27,7 @@ use wayland_client::{globals::registry_queue_init, Connection};
 
 use crate::input::InputMsg;
 pub use config::PointerConfig;
-use modes::Rect;
+pub use modes::Rect;
 use session::{Outcome, PointerApp, Request};
 
 const USAGE: &str = "\
