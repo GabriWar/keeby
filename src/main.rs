@@ -446,7 +446,8 @@ fn main() {
         Surface::new(layer, size)
     };
 
-    let keys_surface = make_layer("keeby", Anchor::BOTTOM, (WIDTH, HEIGHT), (0, 0, cfg.margin_bottom, 0));
+    let keys_margins = anchor_margins(cfg.keys_anchor, cfg.keys_margin_x, cfg.margin_bottom);
+    let keys_surface = make_layer("keeby", anchor_to_wlr(cfg.keys_anchor), (WIDTH, HEIGHT), keys_margins);
     let mouse_renderer = cfg.mouse_enabled.then(|| MouseRenderer::new(&cfg));
     let mouse_surface = mouse_renderer.as_ref().map(|r| {
         let margins = anchor_margins(cfg.mouse_anchor, cfg.mouse_margin_x, cfg.mouse_margin_y);

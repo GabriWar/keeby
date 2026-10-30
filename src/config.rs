@@ -76,6 +76,8 @@ pub struct Config {
     pub theme: Theme,
     pub font_size: f32,
     pub margin_bottom: i32,
+    pub keys_anchor: Anchor,
+    pub keys_margin_x: i32,
     pub pill_life_secs: f32,
     pub pill_fade_secs: f32,
 
@@ -115,6 +117,8 @@ impl Default for Config {
             theme: Theme::default(),
             font_size: 26.0,
             margin_bottom: 80,
+            keys_anchor: Anchor::Bottom,
+            keys_margin_x: 0,
             pill_life_secs: 3.5,
             pill_fade_secs: 1.0,
             mouse_enabled: true,
@@ -167,6 +171,16 @@ impl Config {
                 "margin_bottom" => {
                     if let Ok(n) = v.parse::<i32>() {
                         cfg.margin_bottom = n;
+                    }
+                }
+                "keys_anchor" => {
+                    if let Some(a) = parse_anchor(v) {
+                        cfg.keys_anchor = a;
+                    }
+                }
+                "keys_margin_x" => {
+                    if let Ok(n) = v.parse::<i32>() {
+                        cfg.keys_margin_x = n;
                     }
                 }
                 "life" | "pill_life" => {
@@ -315,7 +329,9 @@ fn write_default(path: &std::path::Path) -> std::io::Result<()> {
     let body = "# keeby config
 # font = path to .ttf/.otf (defaults to cozette → jetbrains → noto)
 # size = font size in px (cozette is a pixel font, try multiples of 13)
-# margin_bottom = pixels above bottom edge
+# margin_bottom = pixels from the top/bottom edge
+# keys_anchor   = where the pills sit: top-left | top | top-right | left | center | right | bottom-left | bottom | bottom-right
+# keys_margin_x = pixels from the left/right edge (unused when centered)
 # life = seconds a key pill stays before fading
 # fade = seconds the fade animation lasts
 #
@@ -336,6 +352,8 @@ fn write_default(path: &std::path::Path) -> std::io::Result<()> {
 # font = /usr/share/fonts/TTF/CozetteVector.ttf
 size = 26
 margin_bottom = 80
+keys_anchor = bottom
+keys_margin_x = 0
 life = 3.5
 fade = 1.0
 

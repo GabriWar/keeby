@@ -109,7 +109,9 @@ shade_color     = #22222266   # dims the screen behind the pointer
 
 # --- overlay ---
 size = 26
-margin_bottom = 80
+margin_bottom = 80            # from the top/bottom edge
+keys_anchor = bottom          # same choices as mouse_anchor
+keys_margin_x = 0             # from the left/right edge
 life = 3.5
 fade = 1.0
 mouse_enabled = true

@@ -7,7 +7,7 @@ use tiny_skia::{
     Color, FillRule, Paint, PathBuilder, PixmapMut, PremultipliedColorU8, Transform,
 };
 
-use crate::config::{Config, Rgba};
+use crate::config::{Anchor, Config, Rgba};
 use crate::labels::{is_modifier, label, modifier_order};
 
 pub const WIDTH: u32 = 1000;
@@ -104,6 +104,8 @@ pub struct Renderer {
     accent_color: Rgba,
     text_color: Rgba,
     text_dim_color: Rgba,
+    /// Pills start at the left edge instead of the right.
+    align_left: bool,
 }
 
 impl Renderer {
@@ -121,6 +123,7 @@ impl Renderer {
             accent_color: Rgba::from(cfg.theme.accent),
             text_color: Rgba::from(cfg.theme.text),
             text_dim_color: Rgba::from(cfg.theme.text_dim),
+            align_left: matches!(cfg.keys_anchor, Anchor::TopLeft | Anchor::Left | Anchor::BottomLeft),
         }
     }
 
@@ -189,8 +192,10 @@ impl Renderer {
             })
             .collect();
 
-        // Place right-to-left starting at right_edge.
-        let mut x_right = right_edge;
+        // Place right-to-left starting at right_edge, or, when anchored left,
+        // so the oldest pill sits at the left margin until the row overflows.
+        let total: f32 = widths.iter().sum::<f32>() + PILL_GAP * (widths.len() - 1) as f32;
+        let mut x_right = if self.align_left { (MARGIN_X + total).min(right_edge) } else { right_edge };
         let n = state.stream.len();
         for i in (0..n).rev() {
             let pill = &state.stream[i];

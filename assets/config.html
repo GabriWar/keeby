@@ -104,7 +104,9 @@ const SCHEMA = [
   ]],
   ['keys', 'Key overlay', 'The pills showing what you press.', [
     ['size', 'Text size', 'number', '26', 'px'],
-    ['margin_bottom', 'Distance from the bottom', 'number', '80', 'px'],
+    ['keys_anchor', 'Position', 'select', 'bottom', '', anchors],
+    ['keys_margin_x', 'Horizontal margin', 'number', '0', 'px from the left/right edge'],
+    ['margin_bottom', 'Vertical margin', 'number', '80', 'px from the top/bottom edge'],
     ['life', 'Pill lifetime', 'number', '3.5', 'seconds'],
     ['fade', 'Fade time', 'number', '1.0', 'seconds'],
     ['privacy_key', 'Privacy key', 'text', 'Pause', 'tap to stop capturing, tap again to resume; none to disable'],
