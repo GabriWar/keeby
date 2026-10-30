@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>keeby train</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --fg: #1b1f27; --muted: #5b6372; --card: #ffffff;
+    --line: #dde1e8; --accent: #e8335a; --key: #eef0f4; --area: #2f6fd8;
+    --ok: #1f9d55; --mid: #8a4fe0;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171d; --fg: #e6e9ef; --muted: #98a1b2; --card: #1c2029;
+      --line: #2c3240; --accent: #ff5577; --key: #262b36; --area: #5d95ff;
+      --ok: #3ccf7f; --mid: #b28cff; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .layout { display: grid; grid-template-columns: 300px minmax(0, 760px) 300px; gap: 28px; justify-content: center;
+    padding: 40px max(16px, env(safe-area-inset-right, 0px)) 64px max(16px, env(safe-area-inset-left, 0px)); }
+  main { min-width: 0; grid-column: 2; grid-row: 1; }
+  .cheat-left { grid-column: 1; }
+  .cheat-right { grid-column: 3; }
+  .cheat { grid-row: 1; position: sticky; top: 16px; align-self: start;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; font-size: 13px; line-height: 1.4; }
+  .cheat h2 { font-size: 16px; margin: 0 0 6px; }
+  .cheat h3 { font-size: 13px; margin: 16px 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .cheat-note { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
+  .cheat table td { padding: 4px; }
+  .cheat table td:first-child { white-space: nowrap; }
+  .cheat kbd { font-size: 11px; padding: 0 5px; }
+  @media (max-width: 1460px) {
+    .layout { grid-template-columns: minmax(0, 760px); }
+    .cheat, main { grid-column: 1; grid-row: auto; position: static; }
+  }
+  h1 { font-size: 30px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 40px 0 12px; }
+  h3 { font-size: 17px; margin: 0; }
+  p { margin: 0 0 12px; }
+  .sub { color: var(--muted); margin-bottom: 28px; }
+  kbd { background: var(--key); border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 5px; padding: 1px 7px; font: 600 14px ui-monospace, monospace; white-space: nowrap; }
+  code { font: 14px ui-monospace, monospace; background: var(--key); padding: 1px 5px; border-radius: 4px; }
+  ol { padding-left: 22px; margin: 0; display: grid; gap: 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  .tip { border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; margin: 14px 0; }
+  .demo { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px; overflow-x: auto; }
+  svg { display: block; width: 100%; max-width: 640px; height: auto; margin: 0 auto; }
+  .word { fill: var(--fg); font: 20px ui-monospace, monospace; }
+  .box { fill: none; stroke: var(--area); stroke-width: 2; }
+  .lbl { fill: var(--area); font: 700 13px ui-monospace, monospace; }
+  .sel { fill: var(--area); opacity: .18; }
+  .pt { fill: var(--accent); }
+  .cap { fill: var(--muted); font: 12px system-ui, sans-serif; }
+  .cursor { fill: var(--fg); stroke: var(--bg); stroke-width: 1; }
+  @media (prefers-reduced-motion: no-preference) {
+    .sel { animation: grow 3s ease-in-out infinite; transform-origin: left; transform-box: fill-box; }
+    .cursor { animation: move 3s ease-in-out infinite; }
+    @keyframes grow { 0%,20% { transform: scaleX(0); } 70%,100% { transform: scaleX(1); } }
+    @keyframes move { 0%,20% { transform: translateX(0); } 70%,100% { transform: translateX(372px); } }
+  }
+
+  /* practice */
+  .game { display: grid; gap: 12px; margin-bottom: 20px; }
+  .game-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .score { font: 13px ui-monospace, monospace; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .task { font-weight: 600; min-height: 1.6em; }
+  .task.good { color: var(--ok); }
+  .task.bad { color: var(--accent); }
+  .arena { position: relative; height: 260px; background: var(--bg); border: 1px dashed var(--line);
+    border-radius: 10px; overflow: hidden; user-select: none; }
+  .target { position: absolute; width: 56px; height: 56px; border-radius: 50%; border: 0; cursor: pointer;
+    color: #fff; font: 700 11px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em; }
+  .target[data-act="left"] { background: var(--area); }
+  .target[data-act="right"] { background: var(--accent); }
+  .target[data-act="middle"] { background: var(--mid); }
+  .target[data-act="double"] { background: var(--ok); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips label { display: flex; align-items: center; gap: 6px; font-size: 14px; background: var(--key);
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 12px 2px 8px; cursor: pointer; }
+  .btn { font: inherit; font-size: 14px; background: var(--key); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 4px 12px; cursor: pointer; }
+  .btn:focus-visible, .target:focus-visible, .chip:focus-visible { outline: 2px solid var(--area); outline-offset: 2px; }
+  .chip { position: absolute; width: 84px; height: 48px; border-radius: 8px; background: var(--area); color: #fff;
+    display: grid; place-items: center; font-weight: 700; cursor: grab; touch-action: none; }
+  .zone { position: absolute; width: 120px; height: 90px; border: 2px dashed var(--ok); border-radius: 10px;
+    display: grid; place-items: center; color: var(--ok); font-size: 13px; font-weight: 600; }
+  .zone.hit { background: color-mix(in srgb, var(--ok) 18%, transparent); }
+  .prose { font-size: 19px; line-height: 2; background: var(--bg); border: 1px dashed var(--line);
+    border-radius: 10px; padding: 16px 20px; }
+  .prose ::selection { background: color-mix(in srgb, var(--area) 35%, transparent); }
+  .want { background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 4px; }
+  .scroller { height: 220px; overflow-y: auto; background: var(--bg); border: 1px dashed var(--line);
+    border-radius: 10px; padding: 8px 16px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 44px;
+    border-bottom: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  .menu { position: relative; display: inline-block; }
+  .menu-list { position: absolute; top: calc(100% + 4px); left: 0; z-index: 2; min-width: 170px; margin: 0;
+    padding: 6px; list-style: none; background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 8px 24px rgb(0 0 0 / .18); }
+  .menu-list button { display: block; width: 100%; text-align: left; font: inherit; font-size: 15px;
+    background: none; color: var(--fg); border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  .menu-list button:hover { background: var(--key); }
+  .menu-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; min-height: 230px;
+    background: var(--bg); border: 1px dashed var(--line); border-radius: 10px; padding: 16px; }
+  select.btn { padding: 4px 8px; }
+  .files { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px;
+    background: var(--bg); border: 1px dashed var(--line); border-radius: 10px; padding: 14px; user-select: none; }
+  .file { display: grid; justify-items: center; gap: 6px; padding: 10px 6px; border: 1px solid transparent;
+    border-radius: 8px; background: none; color: var(--fg); font: 13px ui-monospace, monospace; cursor: default; }
+  .file .ico { width: 34px; height: 42px; border-radius: 4px 12px 4px 4px; background: var(--key);
+    border: 1px solid var(--line); display: grid; place-items: center; font: 700 10px system-ui, sans-serif;
+    color: var(--muted); text-transform: uppercase; }
+  .file.selected { background: color-mix(in srgb, var(--area) 14%, transparent); border-color: var(--area); }
+  .file.opened .ico { background: var(--ok); color: #fff; border-color: var(--ok); }
+  .hover-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; min-height: 250px;
+    background: var(--bg); border: 1px dashed var(--line); border-radius: 10px; padding: 16px; }
+  .hmenu { position: relative; }
+  .hmenu > .btn { cursor: default; }
+  .hmenu .menu-list { display: none; }
+  .hmenu:hover .menu-list { display: block; }
+  .hmenu .menu-list::before { content: ""; position: absolute; inset: -6px 0 auto; height: 6px; }
+  .tiny { position: absolute; width: 10px; height: 10px; padding: 0; border: 0; border-radius: 2px;
+    background: var(--accent); cursor: pointer; }
+  .arena.miss-flash { border-color: var(--accent); }
+  .slider-wrap { display: flex; align-items: center; gap: 16px; padding: 24px 16px; background: var(--bg);
+    border: 1px dashed var(--line); border-radius: 10px; }
+  .slider-wrap input { flex: 1; min-width: 0; accent-color: var(--area); height: 28px; }
+  .slider-wrap output { font: 700 18px ui-monospace, monospace; min-width: 3ch; text-align: right;
+    font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="layout">
+<aside class="cheat cheat-left" aria-label="Numpad shortcuts">
+  <h2>Numpad</h2>
+  <p class="cheat-note"><b>Alt</b> clicks · <b>Ctrl Alt</b> moves · <b>Shift Alt</b> drags · <b>Ctrl Shift Alt</b> double clicks. Num Lock on or off.</p>
+  <table>
+    <tr><td><kbd>Alt</kbd> <kbd>4</kbd> <kbd>5</kbd> <kbd>6</kbd></td><td>left / middle / right click</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>5</kbd></td><td>move only</td></tr>
+    <tr><td><kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>4</kbd> <kbd>5</kbd> <kbd>6</kbd></td><td>drag left / middle / right</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>4</kbd> <kbd>5</kbd> <kbd>6</kbd></td><td>double left / middle / right</td></tr>
+    <tr><td><kbd>Alt</kbd> <kbd>1</kbd></td><td>tile, then split</td></tr>
+    <tr><td><kbd>Alt</kbd> <kbd>3</kbd></td><td>split, whole screen</td></tr>
+    <tr><td><kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>1</kbd> <kbd>3</kbd></td><td>drag with tile / split</td></tr>
+    <tr><td><kbd>Alt</kbd> <kbd>8</kbd> <kbd>2</kbd></td><td>scroll up / down</td></tr>
+    <tr><td><kbd>Alt</kbd> <kbd>7</kbd> <kbd>9</kbd></td><td>scroll left / right</td></tr>
+    <tr><td><kbd>Alt</kbd> <kbd>0</kbd></td><td>nuke, reset everything</td></tr>
+    <tr><td><kbd>Super</kbd> <kbd>Shift</kbd> <kbd>F5</kbd></td><td>show / hide the key and mouse overlay</td></tr>
+  </table>
+
+</aside>
+
+<main>
+  <h1>keeby train</h1>
+  <p class="sub">How drag and double click work, and games to practice everything without touching the mouse. The shortcuts stay on the side while you scroll.</p>
+
+  <h2>Dragging</h2>
+  <p>Pick where the drag starts, pick where it ends. keeby holds the button down for you in between. <kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>4</kbd> / <kbd>5</kbd> / <kbd>6</kbd> drag with the left / middle / right button.</p>
+
+  <div class="demo">
+    <svg viewBox="0 0 640 170" role="img" aria-label="Drag from the start of the first word to the end of the second word">
+      <rect class="sel" x="38" y="50" width="372" height="40" rx="4"/>
+      <text class="word" x="44" y="77">select</text>
+      <text class="word" x="140" y="77">this</text>
+      <text class="word" x="208" y="77">bit</text>
+      <text class="word" x="262" y="77">of</text>
+      <text class="word" x="302" y="77">text</text>
+      <text class="word" x="430" y="77">please</text>
+      <rect class="box" x="38" y="50" width="86" height="40" rx="4"/>
+      <text class="lbl" x="42" y="44">aa</text>
+      <rect class="box" x="296" y="50" width="114" height="40" rx="4"/>
+      <text class="lbl" x="300" y="44">fs</text>
+      <circle class="pt" cx="38" cy="70" r="5"/>
+      <circle class="pt" cx="410" cy="70" r="5"/>
+      <path class="cursor" d="M38 70 l0 18 l5 -5 l4 9 l3 -1.5 l-4 -9 l7 0 z"/>
+      <text class="cap" x="38" y="122">1st pick: drag starts at</text>
+      <text class="cap" x="38" y="138">the LEFT edge of the target</text>
+      <text class="cap" x="300" y="122">2nd pick: drag ends at</text>
+      <text class="cap" x="300" y="138">the RIGHT edge of the target</text>
+    </svg>
+  </div>
+
+  <h3 style="margin-top: 24px;">Step by step</h3>
+  <div class="card">
+    <ol>
+      <li>Press <kbd>Shift</kbd> + <kbd>Alt</kbd> + <kbd>Num 4</kbd>. The overlay shows labels on everything it found.</li>
+      <li><strong>Let go of Shift and Alt.</strong> Keys only reach keeby once every key is released.</li>
+      <li>Type the label of where the drag should <strong>start</strong>. A red caret marks the spot and the labels come back.</li>
+      <li>Type the label of where the drag should <strong>end</strong>.</li>
+      <li>keeby presses the button at the start, moves to the end and releases. Done.</li>
+    </ol>
+  </div>
+  <p class="tip">Made a mistake? <kbd>Backspace</kbd> goes back one step inside the current pick (e.g. from split back to tile). It can't undo the start once it's set, so if the start is wrong press <kbd>Esc</kbd> and begin again.</p>
+
+  <h3 style="margin-top: 24px;">Where exactly it grabs</h3>
+  <p>In <strong>floating</strong> mode (labels on detected things) the start is the <em>left</em> edge of the first target and the end is the <em>right</em> edge of the second. That's why picking two words selects both words completely.</p>
+  <p>In <strong>tile</strong> and <strong>split</strong> modes both points are the <em>center</em> of what you picked, which is better for dragging things like sliders, files or window borders.</p>
+
+  <h3 style="margin-top: 24px;">Drag keys</h3>
+  <div class="card" style="padding: 6px 12px; overflow-x: auto;">
+    <table>
+      <tr><th>Keys</th><th>Picks with</th><th>Good for</th></tr>
+      <tr><td><kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>Num 4</kbd> / <kbd>5</kbd> / <kbd>6</kbd></td><td>floating labels, twice</td><td>selecting text, word to word</td></tr>
+      <tr><td><kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>Num 1</kbd></td><td>tile grid, then split</td><td>dragging to an exact spot</td></tr>
+      <tr><td><kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>Num 3</kbd></td><td>split only, whole screen</td><td>sliders, resizing, anywhere without labels</td></tr>
+    </table>
+  </div>
+
+  <h3 style="margin-top: 24px;">Dragging in split mode</h3>
+  <p>Arrows cut the area in half toward that side. <kbd>Enter</kbd> or <kbd>Space</kbd> confirms the pick. For a drag you confirm twice: once for the start, once for the end.</p>
+
+  <h3 style="margin-top: 24px;">From the terminal</h3>
+  <p>Add <code>-d</code> (or <code>--drag</code>) to any mode chain:</p>
+  <p><code>keeby point -d -o modes=floating,click</code></p>
+  <p>The drag uses <code>mode_click.button</code> (left, middle, right). In split mode, ending a pick with <kbd>g</kbd> / <kbd>h</kbd> / <kbd>b</kbd> picks the button instead, and <kbd>Enter</kbd> means left. The start marker can be changed in <code>keeby config</code> (the Drag section, with a live preview) or in <code>~/.config/keeby/config.conf</code>: <code>mode_drag.start_marker_shape</code> (caret, circle, rectangle), <code>mode_drag.start_marker_color</code> and <code>mode_drag.start_marker_size</code>.</p>
+
+  <h2>Double click</h2>
+  <p>Two ways to get one:</p>
+  <div class="card" style="padding: 6px 12px; overflow-x: auto;">
+    <table>
+      <tr><th>Keys</th><th>What happens</th></tr>
+      <tr><td><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>Num 4</kbd> / <kbd>5</kbd> / <kbd>6</kbd></td><td>floating labels, the pick gets a left / middle / right double click</td></tr>
+      <tr><td><kbd>Shift</kbd> <kbd>g</kbd> / <kbd>h</kbd> / <kbd>b</kbd> inside split or bisect</td><td>left / right / middle double click on the spot you aimed at</td></tr>
+    </table>
+  </div>
+  <p class="tip">The second way lets you decide late: aim with <kbd>Alt</kbd> <kbd>3</kbd>, then press <kbd>g</kbd> for one click or <kbd>Shift</kbd> <kbd>g</kbd> for two.</p>
+
+  <h2>Practice</h2>
+  <p>Hands off the mouse. Everything below counts only what you do with the keyboard, so no cheating.</p>
+
+  <section class="card game" id="g-click">
+    <div class="game-head"><h3>Click the dot</h3><span class="score" id="click-score">hits 0 · misses 0</span></div>
+    <div class="chips" id="click-acts">
+      <label><input type="checkbox" value="left" checked> left <kbd>Alt</kbd> <kbd>4</kbd></label>
+      <label><input type="checkbox" value="middle" checked> middle <kbd>Alt</kbd> <kbd>5</kbd></label>
+      <label><input type="checkbox" value="right" checked> right <kbd>Alt</kbd> <kbd>6</kbd></label>
+      <label><input type="checkbox" value="double" checked> double <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>4</kbd></label>
+    </div>
+    <div class="task" id="click-task"></div>
+    <div class="arena" id="click-arena"><button class="target" id="click-target" type="button"></button></div>
+  </section>
+
+  <section class="card game" id="g-files">
+    <div class="game-head"><h3>Open the file (double click)</h3><span class="score" id="files-score">hits 0 · misses 0</span></div>
+    <div class="task" id="files-task"></div>
+    <div class="files" id="files"></div>
+  </section>
+
+  <section class="card game" id="g-word">
+    <div class="game-head"><h3>Grab the word (double click)</h3><span class="score" id="word-score">hits 0 · misses 0</span></div>
+    <div class="task" id="word-task"></div>
+    <div class="prose" id="word-text"></div>
+  </section>
+
+  <section class="card game" id="g-drag">
+    <div class="game-head"><h3>Drag it into the box</h3><span class="score" id="drag-score">hits 0 · misses 0</span></div>
+    <div class="task" id="drag-task">Drag the block into the green box. <kbd>Shift</kbd> <kbd>Alt</kbd> <kbd>4</kbd>, pick the block, then the box.</div>
+    <div class="arena" id="drag-arena">
+      <div class="zone" id="drag-zone">drop here</div>
+      <div class="chip" id="drag-chip">drag me</div>
+    </div>
+  </section>
+
+  <section class="card game" id="g-select">
+    <div class="game-head"><h3>Select the words</h3><span class="score" id="select-score">hits 0 · misses 0</span></div>
+    <div class="task" id="select-task"></div>
+    <div class="prose" id="select-text"></div>
+  </section>
+
+  <section class="card game" id="g-scroll">
+    <div class="game-head"><h3>Scroll and find it</h3><span class="score" id="scroll-score">hits 0</span></div>
+    <div class="task" id="scroll-task">Somewhere down there is a button. Scroll with <kbd>Alt</kbd> <kbd>2</kbd> / <kbd>8</kbd>, then click it.</div>
+    <div class="scroller" id="scroll-box"></div>
+  </section>
+
+  <section class="card game" id="g-tiny">
+    <div class="game-head"><h3>Tiny target (split)</h3><span class="score" id="tiny-score">hits 0 · misses 0</span></div>
+    <div class="task" id="tiny-task">Too small for labels. <kbd>Alt</kbd> <kbd>3</kbd>, cut toward it with the arrows, then <kbd>g</kbd> to left click (<kbd>Shift</kbd> <kbd>g</kbd> double clicks). <kbd>Alt</kbd> <kbd>1</kbd> starts from the tile grid instead.</div>
+    <div class="arena" id="tiny-arena"><button class="tiny" id="tiny-target" type="button" aria-label="tiny target"></button></div>
+  </section>
+
+  <section class="card game" id="g-slider">
+    <div class="game-head"><h3>Set the slider (split drag)</h3><span class="score" id="slider-score">hits 0 · misses 0</span></div>
+    <div class="task" id="slider-task"></div>
+    <div class="slider-wrap">
+      <input type="range" id="slider" min="0" max="100" value="0" aria-label="value">
+      <output id="slider-out" for="slider">0</output>
+    </div>
+  </section>
+
+  <section class="card game" id="g-hover">
+    <div class="game-head"><h3>Hover dropdown</h3><span class="score" id="hover-score">hits 0 · misses 0</span></div>
+    <div class="task" id="hover-task"></div>
+    <p style="color: var(--muted); font-size: 14px;">These menus only open while the cursor is on them. <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>5</kbd> to park the cursor on the menu, then <kbd>Alt</kbd> <kbd>4</kbd> to click the item. Clicking the menu name does nothing.</p>
+    <div class="hover-row" id="hover-row"></div>
+  </section>
+
+  <section class="card game" id="g-menu">
+    <div class="game-head"><h3>Pick from the dropdown</h3><span class="score" id="menu-score">hits 0 · misses 0</span></div>
+    <div class="task" id="menu-task"></div>
+    <p style="color: var(--muted); font-size: 14px;">This menu closes when the window loses focus, like most sites do. With <code>key_source=evdev</code> it stays open while you pick.</p>
+    <div class="menu-row">
+      <div class="menu">
+        <button class="btn" id="menu-btn" type="button" aria-expanded="false">Fruit ▾</button>
+        <ul class="menu-list" id="menu-list" hidden></ul>
+      </div>
+      <select class="btn" id="menu-select" aria-label="Fruit"></select>
+    </div>
+  </section>
+</main>
+
+<aside class="cheat cheat-right" aria-label="Overlay and cursor mode keys">
+  <h2>Overlay open</h2>
+  <p class="cheat-note">Let go of the modifiers first. Closes by itself after 30s idle.</p>
+  <table>
+    <tr><td>letters</td><td>pick a label</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>split: cut that way</td></tr>
+    <tr><td><kbd>Enter</kbd> <kbd>Space</kbd></td><td>split: confirm, no click</td></tr>
+    <tr><td><kbd>g</kbd> <kbd>h</kbd> <kbd>b</kbd></td><td>split: left / right / middle</td></tr>
+    <tr><td><kbd>Shift</kbd> + <kbd>g</kbd> <kbd>h</kbd> <kbd>b</kbd></td><td>split: double click</td></tr>
+    <tr><td><kbd>Backspace</kbd></td><td>back one step</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>cancel</td></tr>
+  </table>
+
+  <h3>hjkl cursor mode</h3>
+  <table>
+    <tr><td><kbd>Super</kbd> <kbd>Shift</kbd> <kbd>g</kbd></td><td>enter</td></tr>
+    <tr><td><kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd></td><td>move</td></tr>
+    <tr><td><kbd>s</kbd> <kbd>d</kbd> <kbd>f</kbd></td><td>left / middle / right click</td></tr>
+    <tr><td><kbd>m</kbd> <kbd>i</kbd></td><td>scroll up / down</td></tr>
+    <tr><td><kbd>e</kbd> <kbd>t</kbd></td><td>scroll left / right</td></tr>
+    <tr><td><kbd>Space</kbd></td><td>jump with labels</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>leave</td></tr>
+  </table>
+</aside>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const rand = (n) => Math.floor(Math.random() * n);
+const pick = (a) => a[rand(a.length)];
+
+function scorer(el, withMisses = true) {
+  const s = { hits: 0, misses: 0 };
+  const show = () => el.textContent = withMisses ? `hits ${s.hits} · misses ${s.misses}` : `hits ${s.hits}`;
+  return { hit() { s.hits++; show(); }, miss() { s.misses++; show(); } };
+}
+
+function say(el, text, cls = '') {
+  el.textContent = text;
+  el.className = 'task ' + cls;
+}
+
+// --- click the dot ---
+(() => {
+  const arena = $('click-arena'), target = $('click-target'), task = $('click-task');
+  const score = scorer($('click-score'));
+  const names = { left: 'Left click', middle: 'Middle click', right: 'Right click', double: 'Double click' };
+  let want = 'left', shownAt = 0;
+
+  function next() {
+    const acts = [...$('click-acts').querySelectorAll('input:checked')].map((i) => i.value);
+    want = pick(acts.length ? acts : ['left']);
+    target.dataset.act = want;
+    target.textContent = want;
+    target.style.left = 8 + rand(arena.clientWidth - 72) + 'px';
+    target.style.top = 8 + rand(arena.clientHeight - 72) + 'px';
+    say(task, `${names[want]} the dot.`);
+    shownAt = performance.now();
+  }
+
+  function judge(did) {
+    if (did === want) {
+      score.hit();
+      const secs = ((performance.now() - shownAt) / 1000).toFixed(1);
+      next();
+      say(task, `Nice, ${secs}s. Now: ${names[want].toLowerCase()} the dot.`, 'good');
+    } else {
+      score.miss();
+      say(task, `That was a ${did} click. ${names[want]} it.`, 'bad');
+    }
+  }
+
+  target.addEventListener('click', (e) => {
+    if (e.detail === 1 && want !== 'double') judge('left');
+  });
+  target.addEventListener('dblclick', () => { if (want === 'double') judge('double'); });
+  target.addEventListener('contextmenu', (e) => { e.preventDefault(); judge('right'); });
+  target.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+  target.addEventListener('auxclick', (e) => { if (e.button === 1) judge('middle'); });
+  $('click-acts').addEventListener('change', next);
+  next();
+})();
+
+// --- open the file (double click) ---
+(() => {
+  const grid = $('files'), task = $('files-task');
+  const score = scorer($('files-score'));
+  const names = ['notes.txt', 'budget.ods', 'photo.png', 'song.mp3', 'todo.md', 'report.pdf',
+                 'clip.mp4', 'config.toml', 'backup.zip', 'readme.md', 'draw.svg', 'main.c'];
+  let want = '';
+
+  function next() {
+    const shown = [...names].sort(() => Math.random() - 0.5).slice(0, 8);
+    want = pick(shown);
+    grid.innerHTML = shown.map((n) =>
+      `<button type="button" class="file" data-name="${n}"><span class="ico">${n.split('.').pop()}</span>${n}</button>`).join('');
+  }
+
+  grid.addEventListener('click', (e) => {
+    const f = e.target.closest('.file');
+    if (!f || e.detail !== 1) return;
+    grid.querySelectorAll('.selected').forEach((x) => x.classList.remove('selected'));
+    f.classList.add('selected');
+    if (f.dataset.name === want) say(task, `That only selected it. Double click ${want} to open it.`, 'bad');
+  });
+  grid.addEventListener('dblclick', (e) => {
+    const f = e.target.closest('.file');
+    if (!f) return;
+    if (f.dataset.name === want) {
+      score.hit();
+      f.classList.add('opened');
+      setTimeout(() => { next(); say(task, `Opened. Now open ${want}.`, 'good'); }, 500);
+    } else {
+      score.miss();
+      say(task, `You opened ${f.dataset.name}. Open ${want}.`, 'bad');
+    }
+  });
+  next();
+  say(task, `Open ${want}. One click only selects, it needs a double click.`);
+})();
+
+// --- grab the word (double click) ---
+(() => {
+  const box = $('word-text'), task = $('word-task');
+  const score = scorer($('word-score'));
+  const words = 'Pack my box with five dozen liquor jugs while the jukebox plays a quiet waltz for the night owls'.split(' ');
+  let want = '';
+
+  function next() {
+    const i = rand(words.length);
+    want = words[i];
+    box.innerHTML = words.map((w, j) => j === i ? `<span class="want">${w}</span>` : w).join(' ');
+    say(task, `Double click "${want}" to select it. Try Alt 3 + Shift g on this one.`);
+  }
+
+  box.addEventListener('dblclick', () => {
+    setTimeout(() => {
+      const got = String(window.getSelection()).trim();
+      window.getSelection().removeAllRanges();
+      if (got === want) {
+        score.hit();
+        next();
+        say(task, `Got "${got}". Now "${want}".`, 'good');
+      } else {
+        score.miss();
+        say(task, `Selected "${got}", wanted "${want}".`, 'bad');
+      }
+    });
+  });
+  next();
+})();
+
+// --- drag into the box ---
+(() => {
+  const arena = $('drag-arena'), chip = $('drag-chip'), zone = $('drag-zone'), task = $('drag-task');
+  const score = scorer($('drag-score'));
+  let dragging = false;
+
+  function place() {
+    const w = arena.clientWidth, h = arena.clientHeight;
+    chip.style.left = 12 + rand(Math.max(1, w / 2 - 110)) + 'px';
+    chip.style.top = 12 + rand(h - 72) + 'px';
+    zone.style.left = w / 2 + rand(Math.max(1, w / 2 - 140)) + 'px';
+    zone.style.top = 12 + rand(h - 114) + 'px';
+    zone.classList.remove('hit');
+  }
+
+  function moveChip(e) {
+    const r = arena.getBoundingClientRect();
+    chip.style.left = e.clientX - r.left - chip.offsetWidth / 2 + 'px';
+    chip.style.top = e.clientY - r.top - chip.offsetHeight / 2 + 'px';
+  }
+
+  chip.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    chip.setPointerCapture(e.pointerId);
+  });
+  chip.addEventListener('pointermove', (e) => { if (dragging) moveChip(e); });
+  chip.addEventListener('pointerup', (e) => {
+    if (!dragging) return;
+    dragging = false;
+    moveChip(e);
+    // the drop counts where the pointer let go, with a little slack for edges
+    const z = zone.getBoundingClientRect(), slack = 3;
+    const inside = e.clientX >= z.left - slack && e.clientX <= z.right + slack &&
+                   e.clientY >= z.top - slack && e.clientY <= z.bottom + slack;
+    if (inside) {
+      score.hit();
+      zone.classList.add('hit');
+      say(task, 'In the box. Here comes another one.', 'good');
+      setTimeout(place, 700);
+    } else {
+      score.miss();
+      say(task, 'Missed the box. Try again from where it landed.', 'bad');
+    }
+  });
+  place();
+})();
+
+// --- select the words ---
+(() => {
+  const box = $('select-text'), task = $('select-task');
+  const score = scorer($('select-score'));
+  const text = 'The quick brown fox jumps over the lazy dog while a sleepy cat watches from the warm windowsill and a small bird sings somewhere outside the open kitchen door';
+  const words = text.split(' ');
+  let want = '';
+
+  function next() {
+    const len = 2 + rand(3), start = rand(words.length - len);
+    want = words.slice(start, start + len).join(' ');
+    box.innerHTML = words.map((w, i) =>
+      i >= start && i < start + len ? `<span class="want">${w}</span>` : w).join(' ');
+    say(task, `Select "${want}". Drag from its first word to its last.`);
+  }
+
+  const clean = (s) => s.replace(/\s+/g, ' ').trim();
+  box.addEventListener('mouseup', () => {
+    setTimeout(() => {
+      const got = clean(String(window.getSelection()));
+      if (!got) return;
+      if (got === want) {
+        score.hit();
+        window.getSelection().removeAllRanges();
+        next();
+        say(task, `Clean. Now select "${want}".`, 'good');
+      } else {
+        score.miss();
+        say(task, `You got "${got}". Wanted "${want}".`, 'bad');
+      }
+    });
+  });
+  next();
+})();
+
+// --- scroll and find ---
+(() => {
+  const box = $('scroll-box'), task = $('scroll-task');
+  const score = scorer($('scroll-score'), false);
+
+  function next() {
+    const at = 12 + rand(28);
+    box.innerHTML = '';
+    for (let i = 0; i < 40; i++) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.textContent = `row ${i + 1}`;
+      if (i === at) {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        b.type = 'button';
+        b.textContent = 'found me';
+        b.addEventListener('click', () => {
+          score.hit();
+          say(task, `Got it on row ${at + 1}. Hid it somewhere else.`, 'good');
+          next();
+        });
+        row.append(b);
+      }
+      box.append(row);
+    }
+    box.scrollTop = 0;
+  }
+  next();
+})();
+
+// --- tiny target (split) ---
+(() => {
+  const arena = $('tiny-arena'), target = $('tiny-target'), task = $('tiny-task');
+  const score = scorer($('tiny-score'));
+
+  function next() {
+    target.style.left = 10 + rand(arena.clientWidth - 30) + 'px';
+    target.style.top = 10 + rand(arena.clientHeight - 30) + 'px';
+  }
+
+  target.addEventListener('click', (e) => {
+    e.stopPropagation();
+    score.hit();
+    say(task, 'Bullseye. It moved, go again.', 'good');
+    next();
+  });
+  arena.addEventListener('click', () => {
+    score.miss();
+    say(task, 'Close, but that hit the background. Cut a couple more times before clicking.', 'bad');
+  });
+  next();
+})();
+
+// --- slider (split drag) ---
+(() => {
+  const slider = $('slider'), out = $('slider-out'), task = $('slider-task');
+  const score = scorer($('slider-score'));
+  let want = 0;
+
+  function next() {
+    want = 10 + rand(81);
+    say(task, `Drag the slider to ${want} (±3). Shift Alt 3: first pick the handle, then the spot.`);
+  }
+
+  slider.addEventListener('input', () => out.textContent = slider.value);
+  slider.addEventListener('change', () => {
+    const v = Number(slider.value);
+    if (Math.abs(v - want) <= 3) {
+      score.hit();
+      next();
+      say(task, `${v}, close enough. Now ${want}.`, 'good');
+    } else {
+      score.miss();
+      say(task, `Landed on ${v}, wanted ${want}. ${v < want ? 'Go further right.' : 'Go a bit left.'}`, 'bad');
+    }
+  });
+  next();
+})();
+
+// --- hover dropdown ---
+(() => {
+  const row = $('hover-row'), task = $('hover-task');
+  const score = scorer($('hover-score'));
+  const menus = {
+    File: ['New', 'Open', 'Save', 'Export', 'Close'],
+    Edit: ['Undo', 'Redo', 'Cut', 'Copy', 'Paste'],
+    View: ['Zoom in', 'Zoom out', 'Sidebar', 'Fullscreen'],
+  };
+  let want = { menu: '', item: '' };
+
+  row.innerHTML = Object.entries(menus).map(([m, items]) =>
+    `<div class="hmenu"><span class="btn">${m} ▾</span><ul class="menu-list">` +
+    items.map((i) => `<li><button type="button" data-menu="${m}">${i}</button></li>`).join('') +
+    '</ul></div>').join('');
+
+  function next() {
+    const m = pick(Object.keys(menus));
+    want = { menu: m, item: pick(menus[m]) };
+    say(task, `Hover ${m}, then click ${want.item}.`);
+  }
+
+  row.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.menu === want.menu && b.textContent === want.item) {
+      score.hit();
+      next();
+      say(task, `Nice. Now hover ${want.menu} and click ${want.item}.`, 'good');
+    } else {
+      score.miss();
+      say(task, `That was ${b.dataset.menu} → ${b.textContent}. Wanted ${want.menu} → ${want.item}.`, 'bad');
+    }
+  });
+  next();
+})();
+
+// --- dropdown ---
+(() => {
+  const btn = $('menu-btn'), list = $('menu-list'), sel = $('menu-select'), task = $('menu-task');
+  const score = scorer($('menu-score'));
+  const fruits = ['Apple', 'Banana', 'Cherry', 'Grape', 'Lemon', 'Mango', 'Peach', 'Pear'];
+  let want = '', from = '';
+
+  function close() { list.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+
+  function next() {
+    want = pick(fruits);
+    from = pick(['menu', 'select']);
+    sel.innerHTML = '<option value="">Pick one…</option>' + fruits.map((f) => `<option>${f}</option>`).join('');
+    say(task, from === 'menu' ? `Open "Fruit ▾" and click ${want}.` : `Pick ${want} in the select box.`);
+  }
+
+  function judge(got, where) {
+    if (got === want && where === from) {
+      score.hit();
+      next();
+      say(task, 'Yep. ' + task.textContent, 'good');
+    } else {
+      score.miss();
+      say(task, `That was ${got} from the ${where}. ${from === 'menu' ? `Use the Fruit menu and click ${want}.` : `Use the select box and pick ${want}.`}`, 'bad');
+    }
+  }
+
+  list.innerHTML = fruits.map((f) => `<li><button type="button">${f}</button></li>`).join('');
+  btn.addEventListener('click', () => {
+    list.hidden = !list.hidden;
+    btn.setAttribute('aria-expanded', String(!list.hidden));
+  });
+  list.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    close();
+    judge(b.textContent, 'menu');
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.menu')) close(); });
+  window.addEventListener('blur', close);
+  sel.addEventListener('change', () => { if (sel.value) judge(sel.value, 'select'); });
+  next();
+})();
+</script>
+</body>
+</html>

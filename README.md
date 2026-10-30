@@ -87,6 +87,8 @@ bind = ALT SHIFT, KP_4, exec, keeby point -d -o modes=floating,click -o mode_flo
 bind = ALT, KP_3, exec, keeby point -o modes=split
 ```
 
+`tutorial/train.html` is a practice page: open it in a browser for a walkthrough of dragging and double clicking, plus mini games (click, drag, select text, scroll, sliders, hover menus) to play with the keyboard only.
+
 While the labels are up: type a label to pick it, arrows split, `Enter` moves without clicking, `g` / `h` / `b` click left / right / middle (`Shift` for a double click), `Backspace` steps back, `Esc` cancels.
 
 Every pick prints `wxh+x+y +ox+oy click` (the area, the output's position and `l`, `m`, `r`, `d` or `n`), so scripts can use it with `-p`.
