@@ -29,8 +29,10 @@ pub struct Theme {
     pub font: Option<String>,
     /// Older pill background, panels.
     pub bg: u32,
-    /// Newest pill background, selectable areas.
+    /// Newest pill background.
     pub accent: u32,
+    /// Pointer overlay targets and areas, apart from the pills.
+    pub target: u32,
     pub text: u32,
     pub text_dim: u32,
     /// Typed label prefix, pointer crosshair, motion arrow, drag marker.
@@ -45,6 +47,7 @@ impl Default for Theme {
             font: None,
             bg: 0x21222cd9,
             accent: 0x5c52a0eb,
+            target: 0x26c6a6eb,
             text: 0xffffffff,
             text_dim: 0xd2d6e6ff,
             highlight: 0xffc750f2,
@@ -207,6 +210,11 @@ impl Config {
                         cfg.theme.accent = c;
                     }
                 }
+                "target_color" | "color_target" => {
+                    if let Some(c) = parse_color_u32(v) {
+                        cfg.theme.target = c;
+                    }
+                }
                 "text_color" | "color_text" => {
                     if let Some(c) = parse_color_u32(v) {
                         cfg.theme.text = c;
@@ -347,7 +355,8 @@ fn write_default(path: &std::path::Path) -> std::io::Result<()> {
 # font            = font file path or fontconfig family name (unset: the built-in
 #                   Atkinson Hyperlegible Mono, made for telling look-alike letters apart)
 # bg_color        = older pill background
-# accent_color    = newest pill background, selectable pointer areas
+# accent_color    = newest pill background
+# target_color    = pointer overlay targets and areas
 # text_color      = newest pill text, pointer labels
 # text_dim_color  = older pill text
 # highlight_color = mouse arrow, typed label prefix, pointer crosshair
@@ -363,6 +372,7 @@ fade = 1.0
 
 bg_color        = #21222cd9
 accent_color    = #5c52a0eb
+target_color    = #26c6a6eb
 text_color      = #ffffffff
 text_dim_color  = #d2d6e6ff
 highlight_color = #ffc750f2

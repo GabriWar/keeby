@@ -103,7 +103,8 @@ The first launch writes `~/.config/keeby/config.conf`. Every key is optional.
 # --- theme: one palette for the overlay and the pointer ---
 # font = /path/to/font.ttf or a fontconfig family (unset: built-in Atkinson Hyperlegible Mono)
 bg_color        = #21222cd9
-accent_color    = #5c52a0eb
+accent_color    = #5c52a0eb   # newest pill
+target_color    = #26c6a6eb   # pointer targets and areas
 text_color      = #ffffffff
 text_dim_color  = #d2d6e6ff
 highlight_color = #ffc750f2   # mouse arrow, typed label prefix, pointer crosshair

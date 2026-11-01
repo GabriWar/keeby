@@ -159,8 +159,8 @@ impl PointerConfig {
             label_color: theme.text,
             label_select_color: theme.highlight,
             unselectable_bg_color: theme.shade,
-            selectable_bg_color: with_alpha(theme.accent, 0x40),
-            selectable_border_color: with_alpha(theme.accent, 0xcc),
+            selectable_bg_color: with_alpha(theme.target, 0x40),
+            selectable_border_color: with_alpha(theme.target, 0xcc),
             label_font_family: font.clone(),
             label_font_size: RelativeFontSize { min, proportion: 0.5, max: 100.0 },
             label_symbols: "abcdefghijklmnopqrstuvwxyz".to_string(),
@@ -188,8 +188,8 @@ impl PointerConfig {
                 pointer_size: 20.0,
                 pointer_color: theme.highlight,
                 unselectable_bg_color: theme.shade,
-                even_area_bg_color: with_alpha(theme.accent, 0x40),
-                even_area_border_color: with_alpha(theme.accent, 0x80),
+                even_area_bg_color: with_alpha(theme.target, 0x40),
+                even_area_border_color: with_alpha(theme.target, 0x80),
                 odd_area_bg_color: with_alpha(theme.text_dim, 0x30),
                 odd_area_border_color: with_alpha(theme.text_dim, 0x80),
                 history_border_color: with_alpha(theme.text_dim, 0x99),
@@ -199,7 +199,7 @@ impl PointerConfig {
                 pointer_color: theme.highlight,
                 bg_color: theme.shade,
                 area_bg_color: with_alpha(theme.bg, 0x88),
-                vertical_color: with_alpha(theme.accent, 0xcc),
+                vertical_color: with_alpha(theme.target, 0xcc),
                 horizontal_color: with_alpha(theme.highlight, 0xcc),
                 history_border_color: with_alpha(theme.text_dim, 0x99),
             },
@@ -447,7 +447,7 @@ fn parse_relative_font_size(value: &str) -> Result<RelativeFontSize, String> {
 pub const HELP: &str = "\
 # Pointer options. Put them in ~/.config/keeby/config.conf as `section.key = value`,
 # or pass them per run with `-o section.key=value`. Colors you don't set follow the
-# theme (bg_color, accent_color, text_color, text_dim_color, highlight_color,
+# theme (bg_color, target_color, text_color, text_dim_color, highlight_color,
 # shade_color, font).
 
 ## general

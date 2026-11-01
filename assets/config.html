@@ -117,8 +117,8 @@ const labelColors = (sec) => [
   [`${sec}.label_color`, 'Label', 'color', 'theme', 'text color'],
   [`${sec}.label_select_color`, 'Typed part of a label', 'color', 'theme', 'highlight color'],
   [`${sec}.unselectable_bg_color`, 'Screen dim', 'color', 'theme', 'shade color'],
-  [`${sec}.selectable_bg_color`, 'Target fill', 'color', 'theme', 'accent, mostly transparent'],
-  [`${sec}.selectable_border_color`, 'Target border', 'color', 'theme', 'accent'],
+  [`${sec}.selectable_bg_color`, 'Target fill', 'color', 'theme', 'target color, mostly transparent'],
+  [`${sec}.selectable_border_color`, 'Target border', 'color', 'theme', 'target color'],
   [`${sec}.label_font_family`, 'Label font', 'text', '', 'family name or file path; empty = theme font'],
   [`${sec}.label_symbols`, 'Label characters', 'text', 'abcdefghijklmnopqrstuvwxyz'],
 ];
@@ -126,7 +126,8 @@ const SCHEMA = [
   ['theme', 'Theme', 'One palette for the key overlay, the mouse widget and the pointer. Every color below can still be set on its own.', [
     ['font', 'Font', 'text', '', 'family name or .ttf/.otf path; empty = built-in Atkinson Hyperlegible Mono'],
     ['bg_color', 'Background', 'color', '#21222cd9', 'older pills, panels'],
-    ['accent_color', 'Accent', 'color', '#5c52a0eb', 'newest pill, pointer targets'],
+    ['accent_color', 'Accent', 'color', '#5c52a0eb', 'newest pill'],
+    ['target_color', 'Target', 'color', '#26c6a6eb', 'pointer targets and areas'],
     ['text_color', 'Text', 'color', '#ffffffff'],
     ['text_dim_color', 'Dim text', 'color', '#d2d6e6ff', 'older pills'],
     ['highlight_color', 'Highlight', 'color', '#ffc750f2', 'mouse arrow, typed label, crosshair, drag marker'],
