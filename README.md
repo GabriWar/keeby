@@ -87,7 +87,7 @@ bind = ALT SHIFT, KP_4, exec, keeby point -d -o modes=floating,click -o mode_flo
 bind = ALT, KP_3, exec, keeby point -o modes=split
 ```
 
-Tap the bind's key again before letting go of its modifier to click more times: `ALT` + `4` `4` double clicks, `ALT` + `4` `4` `4` triple clicks, and so on.
+Tap the bind's key again before letting go of its modifier to click more times: `ALT` + `4` `4` double clicks, `ALT` + `4` `4` `4` triple clicks, and so on. They go out back to back; set `mode_click.follow_rhythm = true` to have them keep the gaps you tapped them with.
 
 `tutorial/train.html` is a practice page: open it in a browser for a walkthrough of dragging and double clicking, plus mini games (click, drag, select text, scroll, sliders, hover menus) to play with the keyboard only.
 

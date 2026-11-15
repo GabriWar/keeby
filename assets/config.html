@@ -167,6 +167,7 @@ const SCHEMA = [
     ['general.key_source', 'Keyboard', 'select', 'evdev', 'evdev keeps menus open (needs the input group)', ['evdev', 'wayland']],
     ['general.cancellation_status_code', 'Exit status on cancel', 'number', '0'],
     ['mode_click.button', 'Click button', 'select', 'left', '', ['left', 'middle', 'right', 'none']],
+    ['mode_click.follow_rhythm', 'Follow tap rhythm', 'bool', 'false', 'ALT+5 5 5 clicks with the gaps you tapped, not back to back'],
   ]],
   ['floating', 'Floating mode', 'Labels on detected targets (or areas from stdin).', [
     ['mode_floating.source', 'Targets from', 'select', 'stdin', 'detect finds them on screen', ['detect', 'stdin']],

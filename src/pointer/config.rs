@@ -143,6 +143,8 @@ pub struct PointerConfig {
     pub bisect: Bisect,
     pub split: Split,
     pub click_button: Click,
+    /// Repeat taps click with the gaps they were tapped with.
+    pub click_follow_rhythm: bool,
     pub drag: Drag,
 }
 
@@ -204,6 +206,7 @@ impl PointerConfig {
                 history_border_color: with_alpha(theme.text_dim, 0x99),
             },
             click_button: Click::Left,
+            click_follow_rhythm: false,
             drag: Drag {
                 start_marker_color: theme.highlight,
                 start_marker_size: 8.0,
@@ -334,6 +337,13 @@ impl PointerConfig {
                                 "Invalid click button '{value}'. Should be 'left', 'right', 'middle' or 'none'."
                             ))
                         }
+                    }
+                }
+                "follow_rhythm" => {
+                    self.click_follow_rhythm = match value.trim() {
+                        "true" | "yes" | "on" | "1" => true,
+                        "false" | "no" | "off" | "0" => false,
+                        _ => return Err(bad()),
                     }
                 }
                 _ => return Err(unknown(section, field)),
@@ -481,6 +491,8 @@ pub const HELP: &str = "\
 
 ## mode_click
 # mode_click.button         left, right, middle or none   (left)
+# mode_click.follow_rhythm  repeat taps of a bind (ALT+5 5 5) click with the gaps you tapped them
+#                           with, instead of back to back   (false)
 
 ## mode_drag
 # start_marker_color, start_marker_size (8), start_marker_shape: caret, circle or rectangle   (caret)

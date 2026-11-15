@@ -104,6 +104,8 @@ struct Session {
     vptr: Option<zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1>,
     idle_token: Option<RegistrationToken>,
     last_key: Instant,
+    /// When the bind that started or last added a click fired.
+    last_tap: Instant,
     reply: Option<ReplyFn>,
     warnings: String,
 }
@@ -217,6 +219,8 @@ impl PointerApp {
         if let Some(s) = self.session.as_mut() {
             if !s.grabbed && s.req.args == req.args {
                 s.engine.clicks += 1;
+                s.engine.click_gaps.push(s.last_tap.elapsed());
+                s.last_tap = Instant::now();
                 return reply(Outcome::default());
             }
         }
@@ -371,6 +375,7 @@ impl PointerApp {
             vptr,
             idle_token,
             last_key: Instant::now(),
+            last_tap: Instant::now(),
             reply: Some(reply),
             warnings,
         });
@@ -612,7 +617,7 @@ impl PointerApp {
                     if e.click == Click::Drag {
                         self.drag(v, &g, e.drag_start, (r.x + r.w / 2, r.y + r.h / 2), e.drag_button);
                     } else {
-                        self.click(v, &g, (r.x + r.w / 2, r.y + r.h / 2), e.click, e.clicks);
+                        self.click(v, &g, (r.x + r.w / 2, r.y + r.h / 2), e.click, e.clicks, if e.cfg.click_follow_rhythm { &e.click_gaps } else { &[] });
                     }
                 }
             }
@@ -639,10 +644,16 @@ impl PointerApp {
         v.frame();
     }
 
-    fn click(&self, v: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1, g: &OutputGeom, at: (i32, i32), click: Click, clicks: u32) {
+    fn click(&self, v: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1, g: &OutputGeom, at: (i32, i32), click: Click, clicks: u32, gaps: &[Duration]) {
         self.motion(v, g, at);
         if click != Click::None {
-            for _ in 0..clicks {
+            // Clicks from -D or Shift come first, back to back; each tapped
+            // one after them waits its gap.
+            let lead = clicks as usize - gaps.len();
+            for i in 0..clicks as usize {
+                if i >= lead {
+                    std::thread::sleep(gaps[i - lead]);
+                }
                 self.button(v, click.button_code(), true);
                 self.button(v, click.button_code(), false);
                 let _ = self.conn.flush();

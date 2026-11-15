@@ -119,6 +119,8 @@ pub struct Engine {
     pub drag: bool,
     /// How many times to click: 2 for a double click, 3 for a triple...
     pub clicks: u32,
+    /// Time between the repeat taps that added clicks, oldest first.
+    pub click_gaps: Vec<std::time::Duration>,
     drag_phase: u8,
     pub drag_start: (i32, i32),
     pub drag_button: Click,
@@ -141,6 +143,7 @@ impl Engine {
             click: Click::None,
             drag,
             clicks: if double_click { 2 } else { 1 },
+            click_gaps: Vec::new(),
             drag_phase: 0,
             drag_start: (0, 0),
             drag_button: Click::Left,
@@ -949,6 +952,15 @@ mod tests {
         assert_eq!(e.click, Click::Left);
         assert_eq!(e.clicks, 2);
         assert!(e.has_last_mode_returned());
+    }
+
+    #[test]
+    fn follow_rhythm_is_off_by_default_and_settable() {
+        let mut e = engine("floating,click", false);
+        assert!(!e.cfg.click_follow_rhythm);
+        e.cfg.set_option("mode_click.follow_rhythm=true").unwrap();
+        assert!(e.cfg.click_follow_rhythm);
+        assert!(e.cfg.set_option("mode_click.follow_rhythm=maybe").is_err());
     }
 
     #[test]
