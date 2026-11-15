@@ -21,6 +21,9 @@ const HOME_ROW_MIDDLE_CLICK: usize = 10;
 const MIN_SUB_AREA_SIZE: i32 = 25 * 50;
 const DIVIDE_8_RATIO: f64 = 1.8;
 const ARROW_SIZE: f64 = 5.0;
+/// A bind's key held at least this long makes its click, once the target is
+/// picked, keep the button down for as long as the key was held.
+const HOLD_MIN: std::time::Duration = std::time::Duration::from_millis(400);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Rect {
@@ -121,6 +124,8 @@ pub struct Engine {
     pub clicks: u32,
     /// Time between the repeat taps that added clicks, oldest first.
     pub click_gaps: Vec<std::time::Duration>,
+    /// How long each tap of the bind's key was held, oldest first.
+    pub click_holds: Vec<std::time::Duration>,
     drag_phase: u8,
     pub drag_start: (i32, i32),
     pub drag_button: Click,
@@ -144,6 +149,7 @@ impl Engine {
             drag,
             clicks: if double_click { 2 } else { 1 },
             click_gaps: Vec::new(),
+            click_holds: Vec::new(),
             drag_phase: 0,
             drag_start: (0, 0),
             drag_button: Click::Left,
@@ -151,6 +157,17 @@ impl Engine {
             home_row,
             pending_move: None,
         })
+    }
+
+    /// How long click `i` keeps its button down: the hold of the tap it
+    /// came from when that was a long press, else zero. Taps are the last
+    /// clicks; ones from -D or Shift come before them.
+    pub fn hold(&self, i: usize) -> std::time::Duration {
+        let lead = self.clicks as usize - self.click_holds.len().min(self.clicks as usize);
+        match i.checked_sub(lead).and_then(|t| self.click_holds.get(t)) {
+            Some(&h) if h >= HOLD_MIN => h,
+            _ => std::time::Duration::ZERO,
+        }
     }
 
     pub fn has_last_mode_returned(&self) -> bool {
@@ -961,6 +978,27 @@ mod tests {
         e.cfg.set_option("mode_click.follow_rhythm=true").unwrap();
         assert!(e.cfg.click_follow_rhythm);
         assert!(e.cfg.set_option("mode_click.follow_rhythm=maybe").is_err());
+    }
+
+    #[test]
+    fn click_click_hold() {
+        use std::time::Duration;
+        let mut e = engine("floating,click", false);
+        e.clicks = 3;
+        e.click_holds = vec![Duration::from_millis(80), Duration::from_millis(90), Duration::from_secs(5)];
+        assert_eq!(e.hold(0), Duration::ZERO);
+        assert_eq!(e.hold(1), Duration::ZERO);
+        assert_eq!(e.hold(2), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn hold_lines_up_after_double_click_flag() {
+        use std::time::Duration;
+        let mut e = engine("floating,click", false);
+        e.clicks = 2; // -D, one tap held
+        e.click_holds = vec![Duration::from_secs(1)];
+        assert_eq!(e.hold(0), Duration::ZERO);
+        assert_eq!(e.hold(1), Duration::from_secs(1));
     }
 
     #[test]

@@ -106,6 +106,8 @@ struct Session {
     last_key: Instant,
     /// When the bind that started or last added a click fired.
     last_tap: Instant,
+    /// Set while the bind's key that fired last is still down.
+    tap_down: Option<Instant>,
     reply: Option<ReplyFn>,
     warnings: String,
 }
@@ -218,9 +220,14 @@ impl PointerApp {
     pub fn start(&mut self, req: Request, reply: ReplyFn) {
         if let Some(s) = self.session.as_mut() {
             if !s.grabbed && s.req.args == req.args {
+                if s.tap_down.take().is_some() {
+                    // Its release went unseen: count it as a tap.
+                    s.engine.click_holds.push(Duration::ZERO);
+                }
                 s.engine.clicks += 1;
                 s.engine.click_gaps.push(s.last_tap.elapsed());
                 s.last_tap = Instant::now();
+                s.tap_down = Some(s.last_tap);
                 return reply(Outcome::default());
             }
         }
@@ -376,6 +383,7 @@ impl PointerApp {
             idle_token,
             last_key: Instant::now(),
             last_tap: Instant::now(),
+            tap_down: Some(Instant::now()),
             reply: Some(reply),
             warnings,
         });
@@ -417,6 +425,12 @@ impl PointerApp {
             return;
         }
         if !s.grabbed {
+            // Time how long the bind's key (not its modifiers) is held.
+            if events.iter().any(|e| e.value == 0 && !MODIFIER_CODES.contains(&e.code)) {
+                if let Some(t) = s.tap_down.take() {
+                    s.engine.click_holds.push(t.elapsed());
+                }
+            }
             self.try_grab();
             return;
         }
@@ -443,6 +457,10 @@ impl PointerApp {
             fds.push(kb.fd.as_raw_fd());
         }
         s.grabbed = true;
+        // Every key is up now; a tap whose release went unseen was a quick one.
+        if s.tap_down.take().is_some() {
+            s.engine.click_holds.push(Duration::ZERO);
+        }
         self.watchdog.arm(fds);
     }
 
@@ -617,7 +635,7 @@ impl PointerApp {
                     if e.click == Click::Drag {
                         self.drag(v, &g, e.drag_start, (r.x + r.w / 2, r.y + r.h / 2), e.drag_button);
                     } else {
-                        self.click(v, &g, (r.x + r.w / 2, r.y + r.h / 2), e.click, e.clicks, if e.cfg.click_follow_rhythm { &e.click_gaps } else { &[] });
+                        self.click(v, &g, (r.x + r.w / 2, r.y + r.h / 2), e, if e.cfg.click_follow_rhythm { &e.click_gaps } else { &[] });
                     }
                 }
             }
@@ -644,7 +662,8 @@ impl PointerApp {
         v.frame();
     }
 
-    fn click(&self, v: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1, g: &OutputGeom, at: (i32, i32), click: Click, clicks: u32, gaps: &[Duration]) {
+    fn click(&self, v: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1, g: &OutputGeom, at: (i32, i32), e: &Engine, gaps: &[Duration]) {
+        let (click, clicks) = (e.click, e.clicks);
         self.motion(v, g, at);
         if click != Click::None {
             // Clicks from -D or Shift come first, back to back; each tapped
@@ -655,6 +674,11 @@ impl PointerApp {
                     std::thread::sleep(gaps[i - lead]);
                 }
                 self.button(v, click.button_code(), true);
+                let hold = e.hold(i);
+                if !hold.is_zero() {
+                    let _ = self.conn.flush();
+                    std::thread::sleep(hold);
+                }
                 self.button(v, click.button_code(), false);
                 let _ = self.conn.flush();
             }
@@ -675,6 +699,9 @@ impl PointerApp {
         let _ = self.conn.roundtrip();
     }
 }
+
+/// evdev codes of Ctrl, Shift, Alt and Super, left and right.
+const MODIFIER_CODES: [u16; 8] = [29, 97, 42, 54, 56, 100, 125, 126];
 
 fn now_ms() -> u32 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u32).unwrap_or(0)
