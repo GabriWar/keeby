@@ -142,7 +142,7 @@ fn parse_args(args: &[String], stdin: Vec<u8>) -> Parsed {
             return err(e);
         }
     }
-    Parsed::Run(Request { cfg, only_print, output, restrict, drag, double_click: double, stdin })
+    Parsed::Run(Request { cfg, only_print, output, restrict, drag, double_click: double, args: args.to_vec(), stdin })
 }
 
 /// Floating mode's `stdin` source reads `wxh+x+y` areas, one per line.

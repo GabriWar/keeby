@@ -67,6 +67,8 @@ pub struct Request {
     pub restrict: Option<Rect>,
     pub drag: bool,
     pub double_click: bool,
+    /// The raw arguments, to spot the same bind fired again.
+    pub args: Vec<String>,
     pub stdin: Vec<u8>,
 }
 
@@ -207,8 +209,17 @@ impl PointerApp {
             .collect()
     }
 
-    /// Starts a run. A run already in progress is cancelled first.
+    /// Starts a run. A run already in progress is cancelled first, unless
+    /// it's the same request again before the keyboard was grabbed (the
+    /// launching key tapped again with its modifier still held): that adds
+    /// a click, so ALT+5 5 double clicks and ALT+5 5 5 triple clicks.
     pub fn start(&mut self, req: Request, reply: ReplyFn) {
+        if let Some(s) = self.session.as_mut() {
+            if !s.grabbed && s.req.args == req.args {
+                s.engine.clicks += 1;
+                return reply(Outcome::default());
+            }
+        }
         if self.session.is_some() {
             self.finish(false);
         }
@@ -601,7 +612,7 @@ impl PointerApp {
                     if e.click == Click::Drag {
                         self.drag(v, &g, e.drag_start, (r.x + r.w / 2, r.y + r.h / 2), e.drag_button);
                     } else {
-                        self.click(v, &g, (r.x + r.w / 2, r.y + r.h / 2), e.click, e.double_click);
+                        self.click(v, &g, (r.x + r.w / 2, r.y + r.h / 2), e.click, e.clicks);
                     }
                 }
             }
@@ -628,10 +639,10 @@ impl PointerApp {
         v.frame();
     }
 
-    fn click(&self, v: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1, g: &OutputGeom, at: (i32, i32), click: Click, double: bool) {
+    fn click(&self, v: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1, g: &OutputGeom, at: (i32, i32), click: Click, clicks: u32) {
         self.motion(v, g, at);
         if click != Click::None {
-            for _ in 0..if double { 2 } else { 1 } {
+            for _ in 0..clicks {
                 self.button(v, click.button_code(), true);
                 self.button(v, click.button_code(), false);
                 let _ = self.conn.flush();

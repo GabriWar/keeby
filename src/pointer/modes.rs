@@ -117,7 +117,8 @@ pub struct Engine {
     pub running: bool,
     pub click: Click,
     pub drag: bool,
-    pub double_click: bool,
+    /// How many times to click: 2 for a double click, 3 for a triple...
+    pub clicks: u32,
     drag_phase: u8,
     pub drag_start: (i32, i32),
     pub drag_button: Click,
@@ -139,7 +140,7 @@ impl Engine {
             running: true,
             click: Click::None,
             drag,
-            double_click,
+            clicks: if double_click { 2 } else { 1 },
             drag_phase: 0,
             drag_start: (0, 0),
             drag_button: Click::Left,
@@ -320,7 +321,7 @@ impl Engine {
         if i < HOME_ROW_LEN {
             return None;
         }
-        self.double_click = true;
+        self.clicks = self.clicks.max(2);
         Some(i)
     }
 
@@ -946,8 +947,17 @@ mod tests {
         e.enter_next_mode(SCREEN, &mut NoAreas);
         key(&mut e, Keysym::G, "G");
         assert_eq!(e.click, Click::Left);
-        assert!(e.double_click);
+        assert_eq!(e.clicks, 2);
         assert!(e.has_last_mode_returned());
+    }
+
+    #[test]
+    fn shift_g_keeps_a_triple_click() {
+        let mut e = engine("split", false);
+        e.clicks = 3;
+        e.enter_next_mode(SCREEN, &mut NoAreas);
+        key(&mut e, Keysym::G, "G");
+        assert_eq!(e.clicks, 3);
     }
 
     #[test]
