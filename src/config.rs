@@ -103,6 +103,10 @@ pub struct Config {
     /// Name of the key that toggles privacy mode (drops all input until pressed again).
     pub privacy_key: Option<String>,
 
+    /// SVG shown full screen while `keymap_key` is held (keymap-drawer output).
+    pub keymap_image: Option<String>,
+    pub keymap_key: String,
+
     /// Optional whitelist of keyboard device-name substrings (case-insensitive).
     /// Empty = accept everything classified as a keyboard.
     pub keyboard_names: Vec<String>,
@@ -138,6 +142,8 @@ impl Default for Config {
             auto_hide_mouse: false,
             auto_hide_mouse_secs: 6.0,
             privacy_key: Some("Pause".to_string()),
+            keymap_image: None,
+            keymap_key: "Super".to_string(),
             keyboard_names: Vec::new(),
             mouse_names: Vec::new(),
             pointer_settings: Vec::new(),
@@ -292,6 +298,10 @@ impl Config {
                         Some(v.to_string())
                     };
                 }
+                "keymap_image" => {
+                    cfg.keymap_image = (!v.is_empty()).then(|| v.to_string());
+                }
+                "keymap_key" => cfg.keymap_key = v.to_string(),
                 "keyboards" | "keyboard_names" => {
                     cfg.keyboard_names = parse_name_list(v);
                 }
@@ -415,6 +425,14 @@ auto_hide_mouse_secs = 6.0
 # accepted: F1..F12, Pause, ScrollLock, Print, Insert, NumLock, Menu, CapsLock,
 #           or any single letter (a..z) / digit (0..9).
 privacy_key = Pause
+
+# --- keymap cheat sheet ---
+# hold keymap_key on its own and this SVG shows up full screen, one layer
+# every 2 s, until you let go (pressing another key, as in a shortcut, hides
+# it). made for keymap-drawer's output. keymap_key takes the names above plus Super,
+# Alt, Ctrl, Shift (left side) or LeftAlt, RightMeta, ...
+# keymap_image = ~/zmk-config/keymap-drawer/my_keyboard.svg
+keymap_key = Super
 
 # --- input device whitelist ---
 # Comma-separated list of substrings (case-insensitive). If set, only devices

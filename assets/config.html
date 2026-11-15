@@ -156,6 +156,10 @@ const SCHEMA = [
     ['auto_hide_mouse', 'Hide when idle', 'bool', 'false'],
     ['auto_hide_mouse_secs', 'Idle time', 'number', '6.0', 'seconds'],
   ]],
+  ['keymap', 'Keymap', 'Hold a key on its own to see your keymap full screen, one layer every 2 s, until you let go.', [
+    ['keymap_image', 'Image', 'text', '', 'path to an SVG, such as keymap-drawer\'s; empty = off'],
+    ['keymap_key', 'Hold key', 'text', 'Super', 'Super, Alt, Ctrl, Shift, RightAlt, F12, ...'],
+  ]],
   ['devices', 'Devices and monitor', 'Run keeby --list to see names. Empty lists mean every device.', [
     ['monitor', 'Monitor', 'text', 'auto', 'auto or a name like eDP-1'],
     ['keyboards', 'Keyboards', 'text', '', 'comma-separated name parts'],

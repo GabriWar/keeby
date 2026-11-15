@@ -1,6 +1,7 @@
 mod config;
 mod gui;
 mod input;
+mod keymap;
 mod labels;
 mod mouse;
 mod pointer;
@@ -38,9 +39,16 @@ use wayland_client::{
 
 use crate::config::{Anchor as CfgAnchor, Config};
 use crate::input::{DeviceFilter, InputMsg};
+use crate::keymap::Keymap;
 use crate::labels::parse_key_name;
 use crate::mouse::{MouseRenderer, MouseState};
 use crate::render::{Renderer, State as KeyState, HEIGHT, WIDTH};
+
+/// How long `keymap_key` is held alone before the keymap shows, so shortcuts
+/// that start with it don't flash it.
+const KEYMAP_HOLD: Duration = Duration::from_millis(300);
+/// How long each keymap layer stays before the next one.
+const KEYMAP_CYCLE: Duration = Duration::from_secs(2);
 
 /// One overlay layer surface with two buffers it draws into in turn.
 struct Surface {
@@ -122,6 +130,17 @@ struct App {
     auto_hide_mouse: Option<Duration>,
     mouse_hidden: bool,
 
+    compositor: CompositorState,
+    layer_shell: LayerShell,
+    target_output: Option<wl_output::WlOutput>,
+    keymap: Option<Keymap>,
+    keymap_key: Option<Key>,
+    /// Exists only while the keymap is on screen.
+    keymap_surface: Option<Surface>,
+    /// Runs while `keymap_key` is held: shows the keymap after `KEYMAP_HOLD`,
+    /// then moves to the next layer every `KEYMAP_CYCLE`.
+    keymap_timer: Option<RegistrationToken>,
+
     privacy_key: Option<Key>,
     privacy_mode: bool,
     /// `keeby overlay off` hides the pills and the mouse widget; the pointer
@@ -191,7 +210,66 @@ impl App {
         self.draw_mouse();
     }
 
+    /// Holding `keymap_key` alone shows the keymap, cycling through its
+    /// layers, until it's released; another key or a click means a shortcut,
+    /// so it stays hidden, or hides.
+    fn keymap_input(&mut self, msg: &InputMsg) {
+        let Some(key) = self.keymap_key.filter(|_| self.keymap.is_some()) else { return };
+        match *msg {
+            InputMsg::Press(k) if k == key => {
+                if self.keymap_timer.is_none() && self.keymap_surface.is_none() {
+                    self.keymap_timer = self
+                        .loop_handle
+                        .insert_source(Timer::from_duration(KEYMAP_HOLD), |_, _, app: &mut App| {
+                            if app.keymap_surface.is_none() {
+                                app.show_keymap();
+                            } else if let Some(km) = app.keymap.as_mut() {
+                                km.next_layer();
+                                app.draw_keymap();
+                            }
+                            TimeoutAction::ToDuration(KEYMAP_CYCLE)
+                        })
+                        .ok();
+                }
+            }
+            InputMsg::Release(k) if k == key => self.hide_keymap(),
+            InputMsg::Press(_) | InputMsg::MouseButton(_, true) => self.hide_keymap(),
+            _ => {}
+        }
+    }
+
+    fn hide_keymap(&mut self) {
+        if let Some(tok) = self.keymap_timer.take() {
+            self.loop_handle.remove(tok);
+        }
+        self.keymap_surface = None;
+        if let Some(km) = self.keymap.as_mut() {
+            km.reset();
+        }
+    }
+
+    fn draw_keymap(&mut self) {
+        if let (Some(ks), Some(km)) = (self.keymap_surface.as_mut(), self.keymap.as_ref()) {
+            ks.draw(&mut self.pool, &self.qh, false, |pix| km.render(pix));
+        }
+    }
+
+    /// A full-screen surface, drawn on its first configure.
+    fn show_keymap(&mut self) {
+        self.keymap_surface = Some(new_layer(
+            &self.compositor,
+            &self.layer_shell,
+            &self.qh,
+            self.target_output.as_ref(),
+            "keeby-keymap",
+            Anchor::all(),
+            (0, 0),
+            (0, 0, 0, 0),
+        ));
+    }
+
     fn on_input(&mut self, msg: InputMsg) {
+        self.keymap_input(&msg);
         if let InputMsg::SetOverlay(show) = msg {
             self.overlay_hidden = !show.unwrap_or(self.overlay_hidden);
             if self.overlay_hidden {
@@ -290,6 +368,9 @@ impl LayerShellHandler for App {
         } else if let Some(ms) = self.mouse_surface.as_mut().filter(|m| &m.layer == layer) {
             apply(ms);
             self.draw_mouse();
+        } else if let Some(ks) = self.keymap_surface.as_mut().filter(|k| &k.layer == layer) {
+            apply(ks);
+            self.draw_keymap();
         }
     }
 }
@@ -306,6 +387,32 @@ delegate_output!(App);
 delegate_shm!(App);
 delegate_layer!(App);
 delegate_registry!(App);
+
+/// A click-through overlay layer surface; `size` 0 stretches to the anchored
+/// edges.
+#[allow(clippy::too_many_arguments)]
+fn new_layer(
+    compositor: &CompositorState,
+    layer_shell: &LayerShell,
+    qh: &QueueHandle<App>,
+    output: Option<&wl_output::WlOutput>,
+    name: &str,
+    anchor: Anchor,
+    size: (u32, u32),
+    (top, right, bottom, left): (i32, i32, i32, i32),
+) -> Surface {
+    let surface = compositor.create_surface(qh);
+    let region = Region::new(compositor).expect("region");
+    surface.set_input_region(Some(region.wl_region()));
+    let layer = layer_shell.create_layer_surface(qh, surface, Layer::Overlay, Some(name), output);
+    layer.set_anchor(anchor);
+    layer.set_size(size.0, size.1);
+    layer.set_margin(top, right, bottom, left);
+    layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+    layer.set_exclusive_zone(-1);
+    layer.commit();
+    Surface::new(layer, size)
+}
 
 fn anchor_to_wlr(a: CfgAnchor) -> Anchor {
     match a {
@@ -433,18 +540,8 @@ fn main() {
     let layer_shell = LayerShell::bind(&globals, &qh).expect("wlr-layer-shell not available");
     let shm = Shm::bind(&globals, &qh).expect("wl_shm not available");
 
-    let make_layer = |name: &str, anchor: Anchor, size: (u32, u32), (top, right, bottom, left): (i32, i32, i32, i32)| {
-        let surface = compositor.create_surface(&qh);
-        let region = Region::new(&compositor).expect("region");
-        surface.set_input_region(Some(region.wl_region()));
-        let layer = layer_shell.create_layer_surface(&qh, surface, Layer::Overlay, Some(name), target_output.as_ref());
-        layer.set_anchor(anchor);
-        layer.set_size(size.0, size.1);
-        layer.set_margin(top, right, bottom, left);
-        layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-        layer.set_exclusive_zone(-1);
-        layer.commit();
-        Surface::new(layer, size)
+    let make_layer = |name: &str, anchor: Anchor, size: (u32, u32), margins: (i32, i32, i32, i32)| {
+        new_layer(&compositor, &layer_shell, &qh, target_output.as_ref(), name, anchor, size, margins)
     };
 
     let keys_margins = anchor_margins(cfg.keys_anchor, cfg.keys_margin_x, cfg.margin_bottom);
@@ -464,6 +561,13 @@ fn main() {
     if let (Some(name), None) = (cfg.privacy_key.as_deref(), privacy_key) {
         eprintln!("keeby: privacy_key '{name}' not recognized — disabled");
     }
+    let keymap = cfg.keymap_image.as_deref().and_then(|path| {
+        Keymap::load(path, &cfg).map_err(|e| eprintln!("keeby: keymap_image {e}")).ok()
+    });
+    let keymap_key = parse_key_name(&cfg.keymap_key);
+    if keymap.is_some() && keymap_key.is_none() {
+        eprintln!("keeby: keymap_key '{}' not recognized — keymap disabled", cfg.keymap_key);
+    }
     let mut app = App {
         registry_state: RegistryState::new(&globals),
         output_state: OutputState::new(&globals, &qh),
@@ -481,6 +585,13 @@ fn main() {
         last_mouse_activity: Instant::now(),
         auto_hide_mouse: cfg.auto_hide_mouse.then(|| Duration::from_secs_f32(cfg.auto_hide_mouse_secs)),
         mouse_hidden: false,
+        compositor,
+        layer_shell,
+        target_output,
+        keymap,
+        keymap_key,
+        keymap_surface: None,
+        keymap_timer: None,
         privacy_key,
         privacy_mode: false,
         overlay_hidden: false,

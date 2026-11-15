@@ -21,6 +21,7 @@ Both run in one daemon, share one theme, and the keys you type into the pointer 
 - **Any input**: keyboards, mice, touchpads (motion, two-finger scroll, taps, clickpad clicks), tablets and virtual devices; hot-plug without restarting
 - **Device whitelist**: pick keyboards and mice by name when a headset's media keys get in the way
 - **Privacy key**: one tap (default `Pause`) stops capturing and clears the screen, another tap resumes
+- **Keymap cheat sheet**: hold a key (default `Super`) on its own and your keymap shows full screen, one layer at a time every 2 s, until you let go; made for [keymap-drawer](https://github.com/caksoylar/keymap-drawer) SVGs
 
 ### Pointer (`keeby point`)
 
@@ -126,6 +127,8 @@ keyboards =                   # whitelist by name substring, empty = all
 mice      =                   # also applies to touchpads and tablets
 auto_hide_mouse = false       # hide the mouse widget after auto_hide_mouse_secs idle
 privacy_key = Pause
+keymap_image =                # SVG shown full screen while keymap_key is held alone, e.g. keymap-drawer's output
+keymap_key = Super            # Super, Alt, Ctrl, Shift, RightAlt, ... or any privacy_key name
 
 # --- pointer: `section.key = value`, same names as wl-kbptr ---
 general.modes = floating,click
