@@ -191,6 +191,9 @@ pub fn parse_key_name(s: &str) -> Option<Key> {
         "0" => Key::KEY_0, "1" => Key::KEY_1, "2" => Key::KEY_2, "3" => Key::KEY_3,
         "4" => Key::KEY_4, "5" => Key::KEY_5, "6" => Key::KEY_6, "7" => Key::KEY_7,
         "8" => Key::KEY_8, "9" => Key::KEY_9,
+        "KP0" => Key::KEY_KP0, "KP1" => Key::KEY_KP1, "KP2" => Key::KEY_KP2, "KP3" => Key::KEY_KP3,
+        "KP4" => Key::KEY_KP4, "KP5" => Key::KEY_KP5, "KP6" => Key::KEY_KP6, "KP7" => Key::KEY_KP7,
+        "KP8" => Key::KEY_KP8, "KP9" => Key::KEY_KP9,
         _ => return None,
     })
 }

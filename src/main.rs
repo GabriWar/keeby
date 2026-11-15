@@ -7,6 +7,7 @@ mod mouse;
 mod pointer;
 mod preview;
 mod render;
+mod trigger;
 
 use std::time::{Duration, Instant};
 
@@ -41,6 +42,7 @@ use crate::config::{Anchor as CfgAnchor, Config};
 use crate::input::{DeviceFilter, InputMsg};
 use crate::keymap::Keymap;
 use crate::labels::parse_key_name;
+use crate::trigger::Triggers;
 use crate::mouse::{MouseRenderer, MouseState};
 use crate::render::{Renderer, State as KeyState, HEIGHT, WIDTH};
 
@@ -143,6 +145,7 @@ struct App {
 
     privacy_key: Option<Key>,
     privacy_mode: bool,
+    triggers: Triggers,
     /// `keeby overlay off` hides the pills and the mouse widget; the pointer
     /// service keeps running.
     overlay_hidden: bool,
@@ -270,6 +273,9 @@ impl App {
 
     fn on_input(&mut self, msg: InputMsg) {
         self.keymap_input(&msg);
+        if let Some(args) = self.triggers.on(&msg) {
+            run_point(args);
+        }
         if let InputMsg::SetOverlay(show) = msg {
             self.overlay_hidden = !show.unwrap_or(self.overlay_hidden);
             if self.overlay_hidden {
@@ -506,6 +512,18 @@ fn list_monitors() -> Result<Vec<String>, String> {
     Ok(probe.output_state.outputs().filter_map(|o| probe.output_state.info(&o)?.name).collect())
 }
 
+/// Runs `keeby point <args>` the way a compositor bind would.
+fn run_point(args: &[String]) {
+    // Reinstalling while running leaves current_exe pointing at a deleted file.
+    let exe = std::env::current_exe().ok().filter(|p| p.exists()).unwrap_or_else(|| "keeby".into());
+    match std::process::Command::new(exe).arg("point").args(args).spawn() {
+        Ok(mut child) => {
+            std::thread::spawn(move || child.wait());
+        }
+        Err(e) => eprintln!("keeby: trigger: {e}"),
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -594,6 +612,7 @@ fn main() {
         keymap_timer: None,
         privacy_key,
         privacy_mode: false,
+        triggers: Triggers::new(&cfg.triggers),
         overlay_hidden: false,
         exit: false,
     };

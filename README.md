@@ -90,6 +90,15 @@ bind = ALT, KP_3, exec, keeby point -o modes=split
 
 Tap the bind's key again before letting go of its modifier to click more times: `ALT` + `4` `4` double clicks, `ALT` + `4` `4` `4` triple clicks, and so on. They go out back to back; set `mode_click.follow_rhythm = true` to have them keep the gaps you tapped them with. Hold the key 0.4 s or more and, once you pick where, the button stays down that long: hold `4` for 5 s, pick a label, and it presses for 5 s. Works per tap, so `4` `4` `4`(held) is click, click, hold.
 
+No compositor bind? keeby can watch for the keys itself, with `trigger` lines in its config (none by default):
+
+```ini
+trigger = ALT+KP_4 : -o modes=floating,click -o mode_click.button=left
+trigger = SHIFT+ALT+KP_4 : -d -o modes=floating,click -o mode_click.button=left
+```
+
+Repeat taps, holds and `follow_rhythm` work the same. Unlike a bind, the keys still reach the focused app, so pick a combo nothing uses, and don't bind the same combo in your compositor too (both firing counts as two taps).
+
 `tutorial/train.html` is a practice page: open it in a browser for a walkthrough of dragging and double clicking, plus mini games (click, drag, select text, scroll, sliders, hover menus) to play with the keyboard only.
 
 While the labels are up: type a label to pick it, arrows split, `Enter` moves without clicking, `g` / `h` / `b` click left / right / middle (`Shift` for a double click), `Backspace` steps back, `Esc` cancels.
@@ -129,6 +138,7 @@ auto_hide_mouse = false       # hide the mouse widget after auto_hide_mouse_secs
 privacy_key = Pause
 keymap_image =                # SVG shown full screen while keymap_key is held alone, e.g. keymap-drawer's output
 keymap_key = Super            # Super, Alt, Ctrl, Shift, RightAlt, ... or any privacy_key name
+# trigger = ALT+KP_4 : -o modes=floating,click   # run keeby point on these keys, no compositor bind; repeat for more
 
 # --- pointer: `section.key = value`, same names as wl-kbptr ---
 general.modes = floating,click

@@ -107,6 +107,9 @@ pub struct Config {
     pub keymap_image: Option<String>,
     pub keymap_key: String,
 
+    /// `trigger` lines: `keys : keeby point args`, see trigger.rs.
+    pub triggers: Vec<String>,
+
     /// Optional whitelist of keyboard device-name substrings (case-insensitive).
     /// Empty = accept everything classified as a keyboard.
     pub keyboard_names: Vec<String>,
@@ -144,6 +147,7 @@ impl Default for Config {
             privacy_key: Some("Pause".to_string()),
             keymap_image: None,
             keymap_key: "Super".to_string(),
+            triggers: Vec::new(),
             keyboard_names: Vec::new(),
             mouse_names: Vec::new(),
             pointer_settings: Vec::new(),
@@ -302,6 +306,7 @@ impl Config {
                     cfg.keymap_image = (!v.is_empty()).then(|| v.to_string());
                 }
                 "keymap_key" => cfg.keymap_key = v.to_string(),
+                "trigger" => cfg.triggers.push(v.to_string()),
                 "keyboards" | "keyboard_names" => {
                     cfg.keyboard_names = parse_name_list(v);
                 }
@@ -433,6 +438,14 @@ privacy_key = Pause
 # Alt, Ctrl, Shift (left side) or LeftAlt, RightMeta, ...
 # keymap_image = ~/zmk-config/keymap-drawer/my_keyboard.svg
 keymap_key = Super
+
+# --- pointer triggers ---
+# run `keeby point` on a key combo without a compositor bind, one line each:
+#   trigger = <modifiers>+<key> : <keeby point arguments>
+# the keys still reach the focused app, so pick a combo nothing uses. don't
+# also bind the same combo in your compositor: both firing counts as two taps.
+# trigger = ALT+KP_4 : -o modes=floating,click -o mode_click.button=left
+# trigger = SHIFT+ALT+KP_4 : -d -o modes=floating,click -o mode_click.button=left
 
 # --- input device whitelist ---
 # Comma-separated list of substrings (case-insensitive). If set, only devices
